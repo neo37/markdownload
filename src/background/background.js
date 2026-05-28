@@ -601,10 +601,24 @@ async function notify(message, sender) {
     psSaveTabs(message.tabs, 'pdf');
   }
   else if (message.type === 'ps-save-md-all') {
-    message.tabs.forEach(tab => {
-      const info = { menuItemId: 'download-markdown-all' };
-      downloadMarkdownFromContext(info, tab, true); // silent=true: no save-as dialog for batch
-    });
+    const mdTabs = (message.tabs || []).filter(t =>
+      t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
+    );
+    dbgLog('ps-save-md-all: processing', mdTabs.length, 'tabs');
+    // Sequential — await each tab so SW stays alive and errors don't cascade
+    ;(async () => {
+      for (const tab of mdTabs) {
+        try {
+          dbgLog('ps-save-md-all: saving tab', tab.id, tab.title);
+          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab, true);
+          dbgLog('ps-save-md-all: done', tab.id);
+        } catch (e) {
+          dbgLog('ps-save-md-all: FAILED tab', tab.id, e.message);
+          console.error(`[md-all] failed for "${tab.title}":`, e);
+        }
+      }
+      dbgLog('ps-save-md-all: all done');
+    })();
   }
 }
 
