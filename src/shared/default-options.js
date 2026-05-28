@@ -18,7 +18,7 @@ const defaultOptions = {
   saveAs: false,
   downloadImages: true,
   imagePrefix: '{pageTitle}/',
-  mdClipsFolder: null,
+  mdClipsFolder: 'MarkDownload/{date:YYYY-MM-DD}/',
   disallowedChars: '[]#^',
   downloadMode: 'downloadsApi',
   turndownEscape: true,
