@@ -285,15 +285,43 @@
         <div class="icon">📄</div>
         <strong data-lang="en" class="visible">Save as Markdown</strong>
         <strong data-lang="ru">Сохранить как Markdown</strong>
-        <span data-lang="en" class="visible">Convert any web page to clean .md with one click</span>
-        <span data-lang="ru">Конвертируй любую страницу в чистый .md одним кликом</span>
+        <span data-lang="en" class="visible">Convert any web page to clean .txt (Markdown) with one click — saves automatically without dialogs</span>
+        <span data-lang="ru">Конвертируй любую страницу в .txt (Markdown) одним кликом — сохраняется автоматически без диалогов</span>
       </div>
       <div class="feature-card">
         <div class="icon">📦</div>
         <strong data-lang="en" class="visible">Bulk export</strong>
         <strong data-lang="ru">Массовый экспорт</strong>
-        <span data-lang="en" class="visible">Save all open tabs as Markdown, HTML, PNG or PDF at once</span>
-        <span data-lang="ru">Сохрани все вкладки как Markdown, HTML, PNG или PDF одним действием</span>
+        <span data-lang="en" class="visible">Save all open tabs as Markdown, HTML, scrolling screenshots or PDF at once</span>
+        <span data-lang="ru">Сохрани все вкладки как Markdown, HTML, скроллинг-скриншоты или PDF одним действием</span>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔗</div>
+        <strong data-lang="en" class="visible">URL list processor</strong>
+        <strong data-lang="ru">Обработка списка ссылок</strong>
+        <span data-lang="en" class="visible">Paste a list of URLs → process each automatically: Markdown, images, screenshots or PDF. Collect links from page in one click.</span>
+        <span data-lang="ru">Вставь список ссылок → каждая обрабатывается автоматически: Markdown, картинки, скриншоты или PDF. Собери ссылки со страницы одним кликом.</span>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🖱️</div>
+        <strong data-lang="en" class="visible">Block selector</strong>
+        <strong data-lang="ru">Выбор блока</strong>
+        <span data-lang="en" class="visible">Click any element on the page to pick it as a CSS selector — all save/screenshot/image actions scope to that block</span>
+        <span data-lang="ru">Кликни на любой элемент страницы — все действия (сохранение, скриншот, картинки) ограничатся этим блоком</span>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📸</div>
+        <strong data-lang="en" class="visible">Scrolling screenshots</strong>
+        <strong data-lang="ru">Скроллинг-скриншоты</strong>
+        <span data-lang="en" class="visible">Captures the full page by scrolling — saves numbered frames 001.png, 002.png... per tab</span>
+        <span data-lang="ru">Снимает всю страницу прокруткой — сохраняет пронумерованные кадры 001.png, 002.png...</span>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🖼️</div>
+        <strong data-lang="en" class="visible">Image queue</strong>
+        <strong data-lang="ru">Очередь картинок</strong>
+        <span data-lang="en" class="visible">Collect images from any tab or all tabs into a queue, then download one by one. Detects lazy-loaded images (data-src, srcset).</span>
+        <span data-lang="ru">Собери картинки с вкладки или всех вкладок в очередь, скачай по одной. Определяет lazy-load изображения (data-src, srcset).</span>
       </div>
       <div class="feature-card">
         <div class="icon">🕷️</div>
@@ -301,13 +329,6 @@
         <strong data-lang="ru">Краулер домена</strong>
         <span data-lang="en" class="visible">Recursively save every page of a site as Markdown</span>
         <span data-lang="ru">Рекурсивно сохрани весь сайт как Markdown</span>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🖼️</div>
-        <strong data-lang="en" class="visible">Download images</strong>
-        <strong data-lang="ru">Скачивание картинок</strong>
-        <span data-lang="en" class="visible">Optionally download all images alongside the .md file</span>
-        <span data-lang="ru">Опционально скачивай все изображения вместе с .md файлом</span>
       </div>
       <div class="feature-card">
         <div class="icon">📐</div>
@@ -322,6 +343,90 @@
         <strong data-lang="ru">Горячие клавиши</strong>
         <span data-lang="en" class="visible">Alt+Shift+M to open, Alt+Shift+D to download directly</span>
         <span data-lang="ru">Alt+Shift+M для открытия, Alt+Shift+D для сохранения</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <h2 data-lang="en" class="visible">How Page Saver works</h2>
+    <h2 data-lang="ru">Как работает Page Saver</h2>
+
+    <div data-lang="en" class="visible" style="display:flex;flex-direction:column;gap:20px">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>URL list — process any list of pages</strong>
+          Click <em>"Open list of URLs..."</em>, paste links (one per line), choose a mode and delay, press <em>Start</em>.
+          Each URL opens as an active tab, waits for the page to render, performs the action (Markdown / images / screenshot / PDF), then closes automatically.
+          Use <em>"Collect from page"</em> to fill the list from the current tab's links instantly.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Block selector — scope everything to one element</strong>
+          Click <em>"🖱 Pick block on page"</em>, then click any element. The CSS selector is stored.
+          All subsequent actions — Markdown save, image queue, screenshots, URL list processing — apply only to that block.
+          The selector persists until you pick a new one.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>Image queue — collect now, download later</strong>
+          Click <em>"Queue images from this tab"</em> or <em>"All tabs"</em>. Images are stored locally (including lazy-loaded ones).
+          Press <em>"Download queue (N)"</em> to download them one by one — each waits for the previous to finish.
+          If a block selector is active, only images inside that block are collected.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <strong>Scrolling screenshots — full-page capture</strong>
+          Click <em>"Screenshot"</em> or use URL list in screenshot mode.
+          The extension scrolls the page from top to bottom, capturing each viewport.
+          Short pages save as <code>title.png</code>; long pages save as <code>title/001.png</code>, <code>002.png</code>...
+        </div>
+      </div>
+    </div>
+
+    <div data-lang="ru" style="display:flex;flex-direction:column;gap:20px">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Список ссылок — обрабатывай любой набор страниц</strong>
+          Нажми <em>"Open list of URLs..."</em>, вставь ссылки (по одной на строку), выбери режим и задержку, нажми <em>Start</em>.
+          Каждый URL открывается как активная вкладка, ждёт рендеринга, выполняет действие (Markdown / картинки / скриншот / PDF) и закрывается автоматически.
+          Кнопка <em>"Collect from page"</em> мгновенно заполняет список ссылками с текущей страницы.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Выбор блока — ограничь всё одним элементом</strong>
+          Нажми <em>"🖱 Pick block on page"</em>, затем кликни на любой элемент. CSS-селектор сохранится.
+          Все последующие действия — сохранение Markdown, очередь картинок, скриншоты, обработка списка ссылок — применяются только к этому блоку.
+          Селектор хранится до тех пор, пока ты не выберешь новый.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>Очередь картинок — собери сейчас, скачай потом</strong>
+          Нажми <em>"Queue images from this tab"</em> или <em>"All tabs"</em>. Картинки сохраняются локально (включая lazy-load).
+          Нажми <em>"Download queue (N)"</em> — скачивание идёт по одной, каждая ждёт завершения предыдущей.
+          Если активен селектор блока — собираются только картинки внутри этого блока.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <strong>Скроллинг-скриншоты — полная страница</strong>
+          Нажми <em>"Screenshot"</em> или используй список ссылок в режиме скриншотов.
+          Расширение прокручивает страницу сверху вниз, захватывая каждый экран.
+          Короткие страницы сохраняются как <code>title.png</code>; длинные — как <code>title/001.png</code>, <code>002.png</code>...
+        </div>
       </div>
     </div>
   </div>
