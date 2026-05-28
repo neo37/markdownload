@@ -317,13 +317,13 @@ function textReplace(string, article, disallowedChars = null) {
 }
 
 // function to convert an article info object into markdown
-async function convertArticleToMarkdown(article, downloadImages = null) {
+async function convertArticleToMarkdown(article, downloadImages = null, tabId = null) {
   const options = await getOptions();
   if (downloadImages != null) {
     options.downloadImages = downloadImages;
   }
 
-  // substitute front and backmatter templates if necessary
+  // substitute front and backmatter templates (uses moment — must run in SW)
   if (options.includeTemplate) {
     options.frontmatter = textReplace(options.frontmatter, article) + '\n';
     options.backmatter = '\n' + textReplace(options.backmatter, article);
@@ -335,7 +335,29 @@ async function convertArticleToMarkdown(article, downloadImages = null) {
   options.imagePrefix = textReplace(options.imagePrefix, article, options.disallowedChars)
     .split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
 
-  let result = turndown(article.content, options, article);
+  let result;
+
+  if (tabId) {
+    // Run Turndown inside the tab where document/DOMParser are always available
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/turndown.js'] });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/turndown-plugin-gfm.js'] });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/convert-article.js'] });
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (content, opts, art) => turndownInPage(content, opts, art),
+        args: [article.content, options, article]
+      });
+      result = results?.[0]?.result;
+    } catch (e) {
+      console.error('Tab-based conversion failed, falling back to SW:', e);
+    }
+  }
+
+  if (!result) {
+    result = turndown(article.content, options, article);
+  }
+
   if (options.downloadImages && options.downloadMode == 'downloadsApi') {
     // pre-download the images
     result = await preDownloadImages(result.imageList, result.markdown);
@@ -525,7 +547,7 @@ async function notify(message, sender) {
     if (!article) return;
 
     // convert the article to markdown
-    const { markdown, imageList } = await convertArticleToMarkdown(article);
+    const { markdown, imageList } = await convertArticleToMarkdown(article, null, tabId || (await chrome.tabs.query({active:true,currentWindow:true}))[0]?.id);
 
     // format the title
     article.title = await formatTitle(article);
@@ -861,7 +883,7 @@ async function downloadMarkdownFromContext(info, tab) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
-  const { markdown, imageList } = await convertArticleToMarkdown(article);
+  const { markdown, imageList } = await convertArticleToMarkdown(article, null, tab.id);
   // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
   await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
@@ -972,7 +994,7 @@ async function copyMarkdownFromContext(info, tab) {
       const options = await getOptions();
       const obsidianVault = options.obsidianVault;
       const obsidianFolder = await formatObsidianFolder(article);
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      const { markdown } = await convertArticleToMarkdown(article, false, tab.id);
       await chrome.scripting.executeScript({target: {tabId: tab.id}, func: (text) => copyToClipboard(text), args: [markdown]});
       await chrome.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
     }
@@ -982,13 +1004,13 @@ async function copyMarkdownFromContext(info, tab) {
       const options = await getOptions();
       const obsidianVault = options.obsidianVault;
       const obsidianFolder = await formatObsidianFolder(article);
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      const { markdown } = await convertArticleToMarkdown(article, false, tab.id);
       await chrome.scripting.executeScript({target: {tabId: tab.id}, func: (text) => copyToClipboard(text), args: [markdown]});
       await browser.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
     }
     else {
       const article = await getArticleFromContent(tab.id, info.menuItemId == "copy-markdown-selection");
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      const { markdown } = await convertArticleToMarkdown(article, false, tab.id);
       await chrome.scripting.executeScript({target: {tabId: tab.id}, func: (text) => copyToClipboard(text), args: [markdown]});
     }
   }
@@ -1105,30 +1127,9 @@ async function psTabToPng(tab, folder) {
   return psDownloadBlob(psBase64ToBlob(b64, 'image/png'), `page-saver/${folder}/screenshots/${title}.png`);
 }
 
-// Save tab as PDF via Chrome DevTools Protocol
+// Save tab as PDF via browser print dialog (avoids black background from dark-mode pages)
 async function psTabToPdf(tab, folder) {
-  const title = psSanitize(tab.title);
-
-  await new Promise((res, rej) =>
-    chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
-      chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res()
-    )
-  );
-
-  try {
-    const result = await new Promise((res, rej) =>
-      chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        'Page.printToPDF',
-        { printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
-          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
-        r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
-      )
-    );
-    return psDownloadBlob(psBase64ToBlob(result.data, 'application/pdf'), `page-saver/${folder}/pdf/${title}.pdf`);
-  } finally {
-    chrome.debugger.detach({ tabId: tab.id });
-  }
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.print() });
 }
 
 // Batch runner — all tabs for a given format
