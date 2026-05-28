@@ -198,21 +198,6 @@ a.button {
     width: 20px;
 }
 
-#prod-it-link {
-    display: block;
-    text-align: center;
-    padding: 5px 0 4px;
-    font-size: 10px;
-    color: var(--primary);
-    text-decoration: none;
-    border-top: 1px solid var(--border);
-    opacity: 0.7;
-    letter-spacing: 0.03em;
-}
-#prod-it-link:hover {
-    opacity: 1;
-    text-decoration: underline;
-}
 
 .checked .check {
     background-color: var(--primary);
