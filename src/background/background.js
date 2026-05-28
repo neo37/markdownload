@@ -373,57 +373,31 @@ async function preDownloadImages(imageList, markdown) {
   // however, in some cases we need to download images *first* so we can get the
   // proper file extension to put into the markdown.
   // so... here we are waiting for all the downloads and replacements to complete
-  await Promise.all(Object.entries(imageList).map(([src, filename]) => new Promise((resolve, reject) => {
-        // we're doing an xhr so we can get it as a blob and determine filetype
-        // before the final save
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', src);
-        xhr.responseType = "blob";
-        xhr.onload = async function () {
-          // here's the returned blob
-          const blob = xhr.response;
+  await Promise.all(Object.entries(imageList).map(async ([src, filename]) => {
+    try {
+      const response = await fetch(src);
+      const blob = await response.blob();
 
-          if (options.imageStyle == 'base64') {
-            var reader = new FileReader();
-            reader.onloadend = function () {
-              markdown = markdown.replaceAll(src, reader.result)
-              resolve()
-            }
-            reader.readAsDataURL(blob);
+      if (options.imageStyle == 'base64') {
+        const dataUrl = await blobToDataUrl(blob);
+        markdown = markdown.replaceAll(src, dataUrl);
+      } else {
+        let newFilename = filename;
+        if (newFilename.endsWith('.idunno')) {
+          newFilename = filename.replace('.idunno', '.' + mimedb[blob.type]);
+          if (!options.imageStyle.startsWith("obsidian")) {
+            markdown = markdown.replaceAll(filename.split('/').map(s => encodeURI(s)).join('/'), newFilename.split('/').map(s => encodeURI(s)).join('/'));
+          } else {
+            markdown = markdown.replaceAll(filename, newFilename);
           }
-          else {
-
-            let newFilename = filename;
-            if (newFilename.endsWith('.idunno')) {
-              // replace any unknown extension with a lookup based on mime type
-              newFilename = filename.replace('.idunno', '.' + mimedb[blob.type]);
-
-              // and replace any instances of this in the markdown
-              // remember to url encode for replacement if it's not an obsidian link
-              if (!options.imageStyle.startsWith("obsidian")) {
-                markdown = markdown.replaceAll(filename.split('/').map(s => encodeURI(s)).join('/'), newFilename.split('/').map(s => encodeURI(s)).join('/'))
-              }
-              else {
-                markdown = markdown.replaceAll(filename, newFilename)
-              }
-            }
-
-            // create an object url for the blob (no point fetching it twice)
-            const blobUrl = URL.createObjectURL(blob);
-
-            // add this blob into the new image list
-            newImageList[blobUrl] = newFilename;
-
-            // resolve this promise now
-            // (the file might not be saved yet, but the blob is and replacements are complete)
-            resolve();
-          }
-        };
-        xhr.onerror = function () {
-          reject('A network error occurred attempting to download ' + src);
-        };
-        xhr.send();
-  })));
+        }
+        const dataUrl = await blobToDataUrl(blob);
+        newImageList[dataUrl] = newFilename;
+      }
+    } catch(e) {
+      console.warn('Failed to download image', src, e);
+    }
+  }));
 
   return { imageList: newImageList, markdown: markdown };
 }
@@ -436,10 +410,8 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
   // download via the downloads API
   if (options.downloadMode == 'downloadsApi' && browser.downloads) {
     
-    // create the object url with markdown data as a blob
-    const url = URL.createObjectURL(new Blob([markdown], {
-      type: "text/markdown;charset=utf-8"
-    }));
+    // create a data url (blob URLs are not available in service workers)
+    const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
   
     try {
 
@@ -515,8 +487,7 @@ function downloadListener(id, url) {
     if (delta.id === id && delta.state && delta.state.current == "complete") {
       // detatch this listener
       browser.downloads.onChanged.removeListener(self);
-      //release the url for the blob
-      URL.revokeObjectURL(url);
+      // data URLs don't need revocation
     }
   }
   return self;
@@ -714,8 +685,7 @@ async function getArticleFromDom(domString) {
   const math = {};
 
   const storeMathInfo = (el, mathInfo) => {
-    let randomId = URL.createObjectURL(new Blob([]));
-    randomId = randomId.substring(randomId.length - 36);
+    const randomId = crypto.randomUUID();
     el.id = randomId;
     math[randomId] = mathInfo;
   };
@@ -733,7 +703,7 @@ async function getArticleFromDom(domString) {
     const display = mathJax3Node.getAttribute('display')
     const inline = !(display && display === 'true')
 
-    const mathNode = document.createElement(inline ? "i" : "p")
+    const mathNode = dom.createElement(inline ? "i" : "p")
     mathNode.textContent = tex;
     mathJax3Node.parentNode.insertBefore(mathNode, mathJax3Node.nextSibling)
     mathJax3Node.parentNode.removeChild(mathJax3Node)
@@ -1070,18 +1040,16 @@ function psSanitize(name) {
   return (name || 'page').replace(/[\\/:*?"<>|]/g, '_').substring(0, 100);
 }
 
-function psDownloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  return browser.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' })
-    .then(id => {
-      // release blob url after download starts
-      browser.downloads.onChanged.addListener(function release(delta) {
-        if (delta.id === id && delta.state && delta.state.current !== 'in_progress') {
-          URL.revokeObjectURL(url);
-          browser.downloads.onChanged.removeListener(release);
-        }
-      });
-    });
+async function psDownloadBlob(blob, filename) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  const url = `data:${blob.type};base64,${btoa(binary)}`;
+  return browser.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
 }
 
 function psBase64ToBlob(b64, mime) {
