@@ -656,6 +656,9 @@ async function notify(message, sender) {
   else if (message.type === 'ps-img-queue-start') {
     processImgQueue();
   }
+  else if (message.type === 'ps-open-url-list') {
+    psOpenUrlList(message.urls, message.delay, message.mode);
+  }
   else if (message.type === 'ps-queue-images') {
     psQueueImages(message.tabs);
   }
@@ -1153,6 +1156,58 @@ function psBase64ToBlob(b64, mime) {
 }
 
 // Open all links from a tab with 3-second delay between each
+function waitForTabLoad(tabId) {
+  return new Promise(resolve => {
+    function listener(id, changeInfo) {
+      if (id === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+    // fallback timeout 30s
+    setTimeout(resolve, 30000);
+  });
+}
+
+async function psOpenUrlList(urls, delaySec = 3, mode = 'open') {
+  if (mode === 'open') {
+    for (const url of urls) {
+      browser.tabs.create({ url, active: false });
+      await new Promise(r => setTimeout(r, delaySec * 1000));
+    }
+    return;
+  }
+
+  const folder = psTimestamp();
+
+  for (const url of urls) {
+    let tab;
+    try {
+      tab = await browser.tabs.create({ url, active: false });
+      await waitForTabLoad(tab.id);
+      // extra settle time for JS-heavy pages
+      await new Promise(r => setTimeout(r, 1500));
+
+      if (mode === 'markdown') {
+        await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
+      } else if (mode === 'images') {
+        await psQueueImages([tab]);
+      } else if (mode === 'screenshot') {
+        await psTabToPng(tab, folder);
+      } else if (mode === 'pdf') {
+        await psTabToPdf(tab, folder, false);
+      }
+    } catch(e) {
+      console.error('[psOpenUrlList] failed for', url, e);
+    } finally {
+      if (tab) browser.tabs.remove(tab.id).catch(() => {});
+    }
+
+    await new Promise(r => setTimeout(r, delaySec * 1000));
+  }
+}
+
 async function psOpenLinks(tabId) {
   const results = await chrome.scripting.executeScript({target: {tabId}, func: () => {
     const seen = new Set();

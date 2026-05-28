@@ -22,6 +22,25 @@
       .ps-btn.red    { background: #d32f2f; }
       .ps-btn.purple { background: #8e24aa; }
       #ps-status { font-size: 11px; color: #aaa; padding: 4px 0 2px; min-height: 14px; }
+      #ps-url-modal {
+        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+        z-index: 999; align-items: center; justify-content: center;
+      }
+      #ps-url-modal.open { display: flex; }
+      #ps-url-modal-box {
+        background: #222; border-radius: 6px; padding: 12px; width: 320px;
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      #ps-url-modal-box label { font-size: 11px; color: #aaa; }
+      #ps-url-textarea {
+        width: 100%; height: 140px; resize: vertical; background: #111; color: #eee;
+        border: 1px solid #555; border-radius: 4px; padding: 6px; font-size: 11px;
+        font-family: monospace; box-sizing: border-box;
+      }
+      #ps-url-delay-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #aaa; }
+      #ps-url-delay { width: 50px; background: #111; color: #eee; border: 1px solid #555;
+        border-radius: 4px; padding: 3px 6px; font-size: 11px; }
+      #ps-url-modal-btns { display: flex; gap: 6px; }
     </style>
   </head>
 
@@ -46,6 +65,9 @@
       <span class="ps-label">Current page</span>
       <div class="ps-row">
         <button class="ps-btn purple" id="ps-open-links">Open all links in new tabs (3s delay)</button>
+      </div>
+      <div class="ps-row">
+        <button class="ps-btn purple" id="ps-open-list">Open list of URLs...</button>
       </div>
       <div class="ps-row">
         <button class="ps-btn purple" id="ps-crawl-domain">Crawl entire domain (recursive, no duplicates)</button>
@@ -105,6 +127,37 @@
     <div id="ps-status"></div>
     <div class="ps-row" style="margin-top:4px">
       <button class="ps-btn" id="ps-show-logs" style="background:#666;font-size:10px">Show debug log</button>
+    </div>
+  </div>
+
+  <!-- URL list modal -->
+  <div id="ps-url-modal">
+    <div id="ps-url-modal-box">
+      <label>Paste URLs (one per line):</label>
+      <textarea id="ps-url-textarea" placeholder="https://example.com&#10;https://another.com"></textarea>
+      <label>Mode:</label>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:11px;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="markdown" checked> Markdown
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="images"> Queue images
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="screenshot"> Screenshots
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="pdf"> PDF
+        </label>
+      </div>
+      <div id="ps-url-delay-row">
+        Delay between URLs:
+        <input id="ps-url-delay" type="number" value="3" min="1" max="60"> sec
+      </div>
+      <div id="ps-url-modal-btns">
+        <button class="ps-btn green" id="ps-url-start" style="flex:1">Start</button>
+        <button class="ps-btn" id="ps-url-cancel" style="background:#555;flex:0 0 auto;padding:6px 12px">Cancel</button>
+      </div>
     </div>
   </div>
 

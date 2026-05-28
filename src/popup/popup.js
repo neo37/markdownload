@@ -444,6 +444,41 @@ blockMdBtn.addEventListener('click', async () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── URL list modal ────────────────────────────────────────────────────────────
+
+const urlModal    = document.getElementById('ps-url-modal');
+const urlTextarea = document.getElementById('ps-url-textarea');
+const urlDelay    = document.getElementById('ps-url-delay');
+
+document.getElementById('ps-open-list').addEventListener('click', () => {
+  urlModal.classList.add('open');
+  urlTextarea.focus();
+});
+
+document.getElementById('ps-url-cancel').addEventListener('click', () => {
+  urlModal.classList.remove('open');
+});
+
+urlModal.addEventListener('click', (e) => {
+  if (e.target === urlModal) urlModal.classList.remove('open');
+});
+
+document.getElementById('ps-url-start').addEventListener('click', () => {
+  const urls = urlTextarea.value
+    .split('\n')
+    .map(s => s.trim())
+    .filter(s => s.startsWith('http://') || s.startsWith('https://'));
+  if (!urls.length) return;
+  const delay = Math.max(1, parseInt(urlDelay.value) || 3);
+  const mode = document.querySelector('input[name="ps-url-mode"]:checked')?.value || 'markdown';
+  psSend('ps-open-url-list', { urls, delay, mode });
+  urlModal.classList.remove('open');
+  psSetStatus(`Processing ${urls.length} URLs as ${mode}…`);
+  window.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 document.getElementById('ps-show-logs').addEventListener('click', async () => {
   const { _debugLog = [] } = await browser.storage.local.get('_debugLog');
   const text = _debugLog.length ? _debugLog.join('\n') : '(no logs yet)';
