@@ -1205,35 +1205,35 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
     try {
       tab = await browser.tabs.create({ url: urls[i], active: true });
       await waitForTabLoad(tab.id);
-      // user-configured delay after load — lets JS-heavy pages finish rendering
       await swDelay(delaySec * 1000);
 
-      try {
-        if (mode === 'markdown') {
-          if (sel) {
-            await psSaveBlockAll([tab], sel, false);
-          } else {
-            await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
-          }
-        } else if (mode === 'screenshot') {
-          await psTabToPng(tab, folder, sel);
-        } else if (mode === 'pdf') {
-          await psTabToPdf(tab, folder, false);
-        } else if (mode === 'pdf-print') {
-          await psTabToPdf(tab, folder, true);
-        }
-      } catch(e) {
-        console.error('[psOpenUrlList] action failed for', urls[i], e);
-      }
-
-      // for images-only mode: queue from DOM then drain before tab closes
-      if (mode === 'images') {
+      // verify tab still exists before acting (some pages crash/redirect/self-close)
+      const tabStillExists = await browser.tabs.get(tab.id).then(() => true).catch(() => false);
+      if (!tabStillExists) {
+        dbgLog('[psOpenUrlList] tab closed before action, skipping', urls[i]);
+      } else {
         try {
-          await psQueueImages([tab]);
+          if (mode === 'markdown') {
+            if (sel) {
+              await psSaveBlockAll([tab], sel, false);
+            } else {
+              await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
+            }
+          } else if (mode === 'screenshot') {
+            await psTabToPng(tab, folder, sel);
+          } else if (mode === 'pdf') {
+            await psTabToPdf(tab, folder, false);
+          } else if (mode === 'pdf-print') {
+            await psTabToPdf(tab, folder, true);
+          }
         } catch(e) {
-          console.warn('[psOpenUrlList] psQueueImages failed', e);
+          console.error('[psOpenUrlList] action failed for', urls[i], e);
         }
-        await processImgQueueNow();
+
+        if (mode === 'images') {
+          try { await psQueueImages([tab]); } catch(e) { console.warn('[psOpenUrlList] psQueueImages failed', e); }
+          await processImgQueueNow();
+        }
       }
 
     } catch(e) {
