@@ -1167,10 +1167,13 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
 
   const folder = psTimestamp();
 
+  const [prevActive] = await browser.tabs.query({ active: true, currentWindow: true });
+
   for (const url of urls) {
     let tab;
     try {
-      tab = await browser.tabs.create({ url, active: false });
+      // open active so JS-heavy SPAs render (some block background tabs)
+      tab = await browser.tabs.create({ url, active: true });
       await waitForTabLoad(tab.id);
       await new Promise(r => setTimeout(r, 1500));
 
@@ -1186,7 +1189,11 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
     } catch(e) {
       console.error('[psOpenUrlList] failed for', url, e);
     } finally {
-      if (tab && closeTabs) browser.tabs.remove(tab.id).catch(() => {});
+      if (tab && closeTabs) {
+        browser.tabs.remove(tab.id).catch(() => {});
+        // restore previous tab
+        if (prevActive) browser.tabs.update(prevActive.id, { active: true }).catch(() => {});
+      }
     }
 
     await new Promise(r => setTimeout(r, delaySec * 1000));
