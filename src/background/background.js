@@ -416,10 +416,11 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
     try {
 
       if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
+      const safeTitle = generateValidFileName(title, options.disallowedChars) || 'untitled';
       // start the download
       const id = await browser.downloads.download({
         url: url,
-        filename: mdClipsFolder + title + ".md",
+        filename: mdClipsFolder + safeTitle + ".md",
         saveAs: options.saveAs
       });
 
