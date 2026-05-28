@@ -593,6 +593,9 @@ var TurndownService = (function () {
         };
       } else {
         Parser.prototype.parseFromString = function (string) {
+          if (typeof document === 'undefined') {
+            return new DOMParser().parseFromString(string, 'text/html')
+          }
           var doc = document.implementation.createHTMLDocument('');
           doc.open();
           doc.write(string);
@@ -605,6 +608,7 @@ var TurndownService = (function () {
   }
 
   function shouldUseActiveX () {
+    if (typeof document === 'undefined') return false
     var useActiveX = false;
     try {
       document.implementation.createHTMLDocument('').open();

@@ -110,7 +110,7 @@ const clipSite = id => {
                     selection: result.selection
                 }
                 return browser.storage.sync.get(defaultOptions).then(options => {
-                    browser.runtime.sendMessage({
+                    return browser.runtime.sendMessage({
                         ...message,
                         ...options
                     });
