@@ -1197,6 +1197,7 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
         } else {
           await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
         }
+        await psQueueImages([tab]); // also queue images (respects block selector)
       } else if (mode === 'images') {
         await psQueueImages([tab]);  // already reads _blockSelector internally
       } else if (mode === 'screenshot') {
