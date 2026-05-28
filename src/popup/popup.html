@@ -22,6 +22,25 @@
       .ps-btn.red    { background: #d32f2f; }
       .ps-btn.purple { background: #8e24aa; }
       #ps-status { font-size: 11px; color: #aaa; padding: 4px 0 2px; min-height: 14px; }
+      #ps-url-modal {
+        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+        z-index: 999; align-items: center; justify-content: center;
+      }
+      #ps-url-modal.open { display: flex; }
+      #ps-url-modal-box {
+        background: #222; border-radius: 6px; padding: 12px; width: 320px;
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      #ps-url-modal-box label { font-size: 11px; color: #aaa; }
+      #ps-url-textarea {
+        width: 100%; height: 140px; resize: vertical; background: #111; color: #eee;
+        border: 1px solid #555; border-radius: 4px; padding: 6px; font-size: 11px;
+        font-family: monospace; box-sizing: border-box;
+      }
+      #ps-url-delay-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #aaa; }
+      #ps-url-delay { width: 50px; background: #111; color: #eee; border: 1px solid #555;
+        border-radius: 4px; padding: 3px 6px; font-size: 11px; }
+      #ps-url-modal-btns { display: flex; gap: 6px; }
     </style>
   </head>
 
@@ -48,6 +67,9 @@
         <button class="ps-btn purple" id="ps-open-links">Open all links in new tabs (3s delay)</button>
       </div>
       <div class="ps-row">
+        <button class="ps-btn purple" id="ps-open-list">Open list of URLs...</button>
+      </div>
+      <div class="ps-row">
         <button class="ps-btn purple" id="ps-crawl-domain">Crawl entire domain (recursive, no duplicates)</button>
         <button class="ps-btn" id="ps-stop-crawl" style="background:#555;flex:0 0 auto;padding:6px 8px;">Stop</button>
       </div>
@@ -55,6 +77,14 @@
         <button class="ps-btn blue"   id="ps-html-one">Save as HTML</button>
         <button class="ps-btn orange" id="ps-png-one">Screenshot</button>
         <button class="ps-btn red"    id="ps-pdf-one">Save as PDF</button>
+      </div>
+      <div style="font-size:11px;margin-top:2px;display:flex;gap:10px;color:#aaa">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="ps-pdf-mode" value="print"> Print dialog
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="ps-pdf-mode" value="cdp" checked> Silent (CDP)
+        </label>
       </div>
     </div>
 
@@ -68,13 +98,86 @@
         <button class="ps-btn orange" id="ps-png-all">All → Screenshots</button>
         <button class="ps-btn red"    id="ps-pdf-all">All → PDF</button>
       </div>
+      <div class="ps-row">
+        <button class="ps-btn" id="ps-tabs-txt" style="background:#607d8b">All tabs → .txt</button>
+      </div>
+    </div>
+
+    <div class="ps-section">
+      <span class="ps-label">Block selector — save one block from all tabs</span>
+      <div class="ps-row">
+        <button class="ps-btn purple" id="ps-pick-block">🖱 Pick block on page</button>
+        <button class="ps-btn" id="ps-cancel-pick" style="background:#555;display:none;flex:0 0 auto;padding:6px 8px;">Cancel</button>
+      </div>
+      <div id="ps-selector-row" style="display:none;margin-top:4px">
+        <input id="ps-selector-input" type="text" placeholder="CSS selector" style="
+          flex:1;width:100%;padding:5px 8px;font-size:11px;font-family:monospace;
+          border:1px solid #4A90E2;border-radius:4px;background:transparent;color:inherit;
+        ">
+      </div>
+      <div class="ps-row" style="margin-top:4px">
+        <button class="ps-btn green" id="ps-block-md-all" disabled>Save block from all tabs → Markdown</button>
+      </div>
+    </div>
+
+    <div class="ps-section">
+      <span class="ps-label">Images</span>
+      <div class="ps-row">
+        <button class="ps-btn orange" id="ps-queue-imgs-one">Queue images from this tab</button>
+        <button class="ps-btn orange" id="ps-queue-imgs-all">All tabs</button>
+      </div>
+      <div class="ps-row">
+        <button class="ps-btn green" id="ps-img-queue-start">Download queue (<span id="ps-img-queue-count">0</span>)</button>
+        <button class="ps-btn" id="ps-img-queue-clear" style="background:#555;flex:0 0 auto;padding:6px 10px;">Clear</button>
+      </div>
     </div>
 
     <div id="ps-status"></div>
     <div class="ps-row" style="margin-top:4px">
       <button class="ps-btn" id="ps-show-logs" style="background:#666;font-size:10px">Show debug log</button>
     </div>
-    <a href="https://prod-it.com" target="_blank" id="prod-it-link">ask for develop</a>
+  </div>
+
+  <!-- URL list modal -->
+  <div id="ps-url-modal">
+    <div id="ps-url-modal-box">
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px">
+        <label style="flex:1;margin:0">Paste URLs (one per line):</label>
+        <button class="ps-btn purple" id="ps-url-collect" style="flex:0 0 auto;padding:4px 8px;font-size:10px">Collect from page</button>
+      </div>
+      <textarea id="ps-url-textarea" placeholder="https://example.com&#10;https://another.com"></textarea>
+      <label>Mode:</label>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:11px;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="markdown" checked> Markdown
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="images"> Queue images
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="screenshot"> Screenshots
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="pdf"> PDF (silent)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="pdf-print"> PDF (print dialog)
+        </label>
+      </div>
+      <div id="ps-url-delay-row">
+        Delay between URLs:
+        <input id="ps-url-delay" type="number" value="3" min="1" max="60"> sec
+      </div>
+      <div style="font-size:11px;margin-bottom:2px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ps-url-close-tabs" checked> Close tabs after processing
+        </label>
+      </div>
+      <div id="ps-url-modal-btns">
+        <button class="ps-btn green" id="ps-url-start" style="flex:1">Start</button>
+        <button class="ps-btn" id="ps-url-cancel" style="background:#555;flex:0 0 auto;padding:6px 12px">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div id="spinner"></div>

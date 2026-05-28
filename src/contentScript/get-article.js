@@ -75,7 +75,12 @@ function getArticleFromCurrentPage(selection) {
   dom.documentElement.removeAttribute('class');
 
   // Parse with Readability (injected before this script runs)
-  const article = new Readability(dom).parse();
+  const article = new Readability(dom).parse() || {
+    title: document.title,
+    content: document.body ? document.body.innerHTML : '',
+    textContent: document.body ? document.body.innerText : '',
+    byline: null, excerpt: null, siteName: null
+  };
 
   // Attach URL metadata from the live document
   article.baseURI = document.baseURI;
@@ -103,6 +108,12 @@ function getArticleFromCurrentPage(selection) {
   }
 
   article.math = math;
+
+  // Collect all unique HTTP(S) links from the live document
+  const seen = new Set();
+  article.links = Array.from(document.querySelectorAll('a[href]'))
+    .map(a => ({ url: a.href, text: (a.textContent || a.innerText || '').trim() }))
+    .filter(l => l.url && (l.url.startsWith('http://') || l.url.startsWith('https://')) && !seen.has(l.url) && seen.add(l.url));
 
   // If selection mode and user has selected text, replace article content
   if (selection) {

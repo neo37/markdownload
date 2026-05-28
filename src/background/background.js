@@ -277,6 +277,7 @@ function getImageFilename(src, options, prependFilePath = true) {
 
 // function to replace placeholder strings with article info
 function textReplace(string, article, disallowedChars = null) {
+  if (!article) return string.replace(/{[^}]*}/g, '');
   for (const key in article) {
     if (article.hasOwnProperty(key) && key != "content") {
       let s = (article[key] || '') + '';
@@ -443,47 +444,41 @@ async function preDownloadImages(imageList, markdown) {
 }
 
 // function to actually download the markdown file
-async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '', forceSilent = false) {
-  // get the options
+async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
   const options = await getOptions();
-  if (forceSilent) options.saveAs = false;
-  
-  // download via the downloads API
-  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
-    
-    // create a data url (blob URLs are not available in service workers)
-    const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
-  
-    try {
 
-      if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
+  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
+    const url = `data:text/plain;charset=utf-8,${encodeURIComponent(markdown)}`;
+    try {
+      if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
       const safeTitle = generateValidFileName(title, options.disallowedChars) || 'untitled';
-      // start the download
       const id = await browser.downloads.download({
         url: url,
-        filename: mdClipsFolder + safeTitle + ".md",
-        saveAs: options.saveAs
+        filename: mdClipsFolder + safeTitle + ".txt",
+        saveAs: false,
+        conflictAction: 'uniquify'
       });
 
       // add a listener for the download completion
       browser.downloads.onChanged.addListener(downloadListener(id, url));
 
-      // download images (if enabled)
+      // download images directly (imageList may contain data: URLs — too large for storage queue)
       if (options.downloadImages) {
-        // get the relative path of the markdown file (if any) for image path
         let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
-        if(destPath && !destPath.endsWith('/')) destPath += '/';
-        Object.entries(imageList || {}).forEach(async ([src, filename]) => {
-          // start the download of the image
-          const imgId = await browser.downloads.download({
-            url: src,
-            // set a destination path (relative to md file)
-            filename: destPath ? destPath + filename : filename,
-            saveAs: false
-          })
-          // add a listener (so we can release the blob url)
-          browser.downloads.onChanged.addListener(downloadListener(imgId, src));
-        });
+        if (destPath && !destPath.endsWith('/')) destPath += '/';
+        for (const [src, filename] of Object.entries(imageList || {})) {
+          try {
+            const imgId = await browser.downloads.download({
+              url: src,
+              filename: destPath ? destPath + filename : filename,
+              saveAs: false,
+              conflictAction: 'uniquify'
+            });
+            browser.downloads.onChanged.addListener(downloadListener(imgId, src));
+          } catch(e) {
+            console.warn('[downloadMarkdown] image failed', filename, e);
+          }
+        }
       }
     }
     catch (err) {
@@ -521,6 +516,53 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       // the page, for example if the tab is a privileged page.
       console.error("Failed to execute script: " + error);
     };
+  }
+}
+
+async function downloadImgItem(item) {
+  try {
+    const id = await browser.downloads.download({
+      url: item.src, filename: item.filename, saveAs: false, conflictAction: 'uniquify'
+    });
+    await new Promise(resolve => {
+      const listener = (delta) => {
+        if (delta.id === id && delta.state &&
+            (delta.state.current === 'complete' || delta.state.current === 'interrupted')) {
+          browser.downloads.onChanged.removeListener(listener);
+          resolve();
+        }
+      };
+      browser.downloads.onChanged.addListener(listener);
+    });
+  } catch(e) {
+    console.warn('[imgQueue] failed', item.filename, e);
+  }
+}
+
+// Drain the entire queue right now (used when tab is about to close)
+async function processImgQueueNow() {
+  const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+  if (!_imgQueue.length) return;
+  await chrome.storage.local.set({ _imgQueue: [] });
+  for (const item of _imgQueue) {
+    await downloadImgItem(item);
+  }
+}
+
+async function processImgQueue() {
+  const { _imgQueueRunning } = await chrome.storage.local.get('_imgQueueRunning');
+  if (_imgQueueRunning) return;
+  await chrome.storage.local.set({ _imgQueueRunning: true });
+  try {
+    while (true) {
+      const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+      if (!_imgQueue.length) break;
+      const [item, ...rest] = _imgQueue;
+      await chrome.storage.local.set({ _imgQueue: rest });
+      await downloadImgItem(item);
+    }
+  } finally {
+    await chrome.storage.local.set({ _imgQueueRunning: false });
   }
 }
 
@@ -579,38 +621,37 @@ async function notify(message, sender) {
   }
   // message for triggering download
   else if (message.type == "download") {
-    downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
+    return downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
   }
   // ── Page Saver handlers ──────────────────────────────────────────────────
   else if (message.type === 'ps-crawl-domain') {
-    psCrawlDomain(message.tabId, message.url);
+    return psCrawlDomain(message.tabId, message.url);
   }
   else if (message.type === 'ps-stop-crawl') {
     _crawlState.running = false;
   }
   else if (message.type === 'ps-open-links') {
-    psOpenLinks(message.tabId);
+    return psOpenLinks(message.tabId);
   }
   else if (message.type === 'ps-save-html') {
-    psSaveTabs(message.tabs, 'html');
+    return psSaveTabs(message.tabs, 'html');
   }
   else if (message.type === 'ps-save-png') {
-    psSaveTabs(message.tabs, 'png');
+    return psSaveTabs(message.tabs, 'png');
   }
   else if (message.type === 'ps-save-pdf') {
-    psSaveTabs(message.tabs, 'pdf');
+    return psSaveTabs(message.tabs, 'pdf', message.pdfMode);
   }
   else if (message.type === 'ps-save-md-all') {
     const mdTabs = (message.tabs || []).filter(t =>
       t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
     );
     dbgLog('ps-save-md-all: processing', mdTabs.length, 'tabs');
-    // Sequential — await each tab so SW stays alive and errors don't cascade
-    ;(async () => {
+    return (async () => {
       for (const tab of mdTabs) {
         try {
           dbgLog('ps-save-md-all: saving tab', tab.id, tab.title);
-          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab, true);
+          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
           dbgLog('ps-save-md-all: done', tab.id);
         } catch (e) {
           dbgLog('ps-save-md-all: FAILED tab', tab.id, e.message);
@@ -619,6 +660,24 @@ async function notify(message, sender) {
       }
       dbgLog('ps-save-md-all: all done');
     })();
+  }
+  else if (message.type === 'block-picked') {
+    browser.runtime.sendMessage({ type: 'block-picked', selector: message.selector }).catch(() => {});
+  }
+  else if (message.type === 'block-pick-cancelled') {
+    browser.runtime.sendMessage({ type: 'block-pick-cancelled' }).catch(() => {});
+  }
+  else if (message.type === 'ps-save-block-all') {
+    return psSaveBlockAll(message.tabs, message.selector, message.saveAs);
+  }
+  else if (message.type === 'ps-img-queue-start') {
+    return processImgQueue();
+  }
+  else if (message.type === 'ps-open-url-list') {
+    return psOpenUrlList(message.urls, message.delay, message.mode, message.closeTabs !== false);
+  }
+  else if (message.type === 'ps-queue-images') {
+    return psQueueImages(message.tabs);
   }
 }
 
@@ -912,15 +971,13 @@ async function formatObsidianFolder(article) {
 }
 
 // function to download markdown, triggered by context menu
-async function downloadMarkdownFromContext(info, tab, silent = false) {
+async function downloadMarkdownFromContext(info, tab) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
   const { markdown, imageList } = await convertArticleToMarkdown(article, null, tab.id);
-  // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder, silent); 
-
+  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder);
 }
 
 // function to copy a tab url as a markdown link
@@ -1115,7 +1172,83 @@ function psBase64ToBlob(b64, mime) {
   return new Blob([arr], { type: mime });
 }
 
-// Open all links from a tab with 3-second delay between each
+
+function swDelay(ms) {
+  // Keeps the service worker alive during long waits by pinging storage
+  return new Promise(resolve => {
+    const start = Date.now();
+    const tick = () => {
+      const remaining = ms - (Date.now() - start);
+      if (remaining <= 0) { resolve(); return; }
+      chrome.storage.local.get('_ka', () => setTimeout(tick, Math.min(remaining, 20000)));
+    };
+    tick();
+  });
+}
+
+async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true) {
+  if (mode === 'open') {
+    for (let i = 0; i < urls.length; i++) {
+      if (i > 0) await swDelay(delaySec * 1000);
+      browser.tabs.create({ url: urls[i], active: false });
+    }
+    return;
+  }
+
+  const folder = psTimestamp();
+  const [prevActive] = await browser.tabs.query({ active: true, currentWindow: true });
+  const { _blockSelector } = await chrome.storage.local.get('_blockSelector');
+  const sel = _blockSelector || null;
+
+  for (let i = 0; i < urls.length; i++) {
+    let tab;
+    try {
+      tab = await browser.tabs.create({ url: urls[i], active: true });
+      await waitForTabLoad(tab.id);
+      await swDelay(delaySec * 1000);
+
+      // verify tab still exists before acting (some pages crash/redirect/self-close)
+      const tabStillExists = await browser.tabs.get(tab.id).then(() => true).catch(() => false);
+      if (!tabStillExists) {
+        dbgLog('[psOpenUrlList] tab closed before action, skipping', urls[i]);
+      } else {
+        try {
+          if (mode === 'markdown') {
+            if (sel) {
+              await psSaveBlockAll([tab], sel, false);
+            } else {
+              await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
+            }
+          } else if (mode === 'screenshot') {
+            await psTabToPng(tab, folder, sel);
+          } else if (mode === 'pdf') {
+            await psTabToPdf(tab, folder, false);
+          } else if (mode === 'pdf-print') {
+            await psTabToPdf(tab, folder, true);
+          }
+        } catch(e) {
+          console.error('[psOpenUrlList] action failed for', urls[i], e);
+        }
+
+        if (mode === 'images') {
+          try { await psQueueImages([tab]); } catch(e) { console.warn('[psOpenUrlList] psQueueImages failed', e); }
+          await processImgQueueNow();
+        }
+      }
+
+    } catch(e) {
+      console.error('[psOpenUrlList] failed for', urls[i], e);
+    } finally {
+      if (tab && closeTabs) {
+        browser.tabs.remove(tab.id).catch(() => {});
+        if (prevActive) browser.tabs.update(prevActive.id, { active: true }).catch(() => {});
+      }
+    }
+
+    await swDelay(500); // brief pause between URLs
+  }
+}
+
 async function psOpenLinks(tabId) {
   const results = await chrome.scripting.executeScript({target: {tabId}, func: () => {
     const seen = new Set();
@@ -1147,17 +1280,100 @@ async function psTabToHtml(tab, folder) {
   return psDownloadBlob(blob, `page-saver/${folder}/html/${title}.html`);
 }
 
-// Save tab as PNG screenshot
-async function psTabToPng(tab, folder) {
+// Save tab as scrolling PNG screenshots, optionally scoped to a CSS selector
+function cdpCmd(tabId, method, params = {}) {
+  return new Promise((res, rej) =>
+    chrome.debugger.sendCommand({ tabId }, method, params,
+      r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r))
+  );
+}
+
+async function psTabToPng(tab, folder, blockSelector = null) {
   const title = psSanitize(tab.title);
-  // Activate tab briefly (required for captureVisibleTab)
-  const [prev] = await browser.tabs.query({ active: true, currentWindow: true });
+
+  const tabInfo = await browser.tabs.get(tab.id);
+  const windowId = tabInfo.windowId;
   await browser.tabs.update(tab.id, { active: true });
-  await new Promise(r => setTimeout(r, 400));
-  const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  if (prev && prev.id !== tab.id) await browser.tabs.update(prev.id, { active: true });
-  const b64 = dataUrl.split(',')[1];
-  return psDownloadBlob(psBase64ToBlob(b64, 'image/png'), `page-saver/${folder}/screenshots/${title}.png`);
+  await chrome.windows.update(windowId, { focused: true });
+  await swDelay(600);
+
+  // attach debugger for mouse/scroll simulation
+  await new Promise((res, rej) =>
+    chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
+      chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res())
+  );
+
+  try {
+    // get dimensions
+    const [dimsResult] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (sel) => {
+        if (sel) {
+          const el = document.querySelector(sel);
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            const absTop = rect.top + window.scrollY;
+            return { startY: absTop, scrollHeight: absTop + el.scrollHeight, innerHeight: window.innerHeight, innerWidth: window.innerWidth };
+          }
+        }
+        return { startY: 0, scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight, innerWidth: window.innerWidth };
+      },
+      args: [blockSelector || null]
+    });
+    const { startY, scrollHeight, innerHeight, innerWidth } = dimsResult?.result ?? { startY: 0, scrollHeight: 800, innerHeight: 800, innerWidth: 1280 };
+    const cx = Math.floor(innerWidth / 2);
+    const cy = Math.floor(innerHeight / 2);
+
+    // scroll to start
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
+    await swDelay(500);
+
+    const shots = [];
+
+    const getScrollY = async () => {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollY });
+      return r?.[0]?.result ?? 0;
+    };
+    const getScrollHeight = async () => {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.documentElement.scrollHeight });
+      return r?.[0]?.result ?? innerHeight;
+    };
+
+    while (true) {
+      const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
+      shots.push(dataUrl.split(',')[1]);
+
+      const curY = await getScrollY();
+      const curScrollHeight = await getScrollHeight();
+
+      dbgLog('[screenshot] scrollY=', curY, 'scrollHeight=', curScrollHeight, 'innerHeight=', innerHeight);
+
+      if (curY + innerHeight >= curScrollHeight) break;
+
+      // click center for focus, then scroll down one viewport
+      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
+      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
+      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', { x: cx, y: cy, xDistance: 0, yDistance: -innerHeight, speed: 800 });
+      await swDelay(600);
+
+      // verify scroll actually moved; if stuck, break
+      const newY = await getScrollY();
+      if (newY <= curY) break;
+    }
+
+    const base = blockSelector
+      ? `page-saver/${folder}/screenshots/${title}-block`
+      : `page-saver/${folder}/screenshots/${title}`;
+    if (shots.length === 1) {
+      await psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'), base + '.png');
+    } else {
+      for (let i = 0; i < shots.length; i++) {
+        await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'), `${base}/${String(i + 1).padStart(3, '0')}.png`);
+      }
+    }
+  } finally {
+    chrome.debugger.detach({ tabId: tab.id });
+  }
 }
 
 // Save tab as PDF.
@@ -1169,17 +1385,44 @@ async function psTabToPdf(tab, folder, single = false) {
     return;
   }
   const title = psSanitize(tab.title);
+
   await new Promise((res, rej) =>
     chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
       chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res()
     )
   );
   try {
+    // check if page is already loaded
+    const [readyResult] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => document.readyState
+    }).catch(() => [{ result: 'loading' }]);
+    const ready = readyResult?.result === 'complete';
+
+    if (!ready) {
+      // wait for load event via CDP
+      await new Promise((res) => {
+        const handler = (src, method) => {
+          if (src.tabId === tab.id && method === 'Page.loadEventFired') {
+            chrome.debugger.onEvent.removeListener(handler);
+            res();
+          }
+        };
+        chrome.debugger.onEvent.addListener(handler);
+        chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.enable', {}, () => {});
+        // safety timeout
+        swDelay(15000).then(res);
+      });
+    }
+
+    // extra wait for JS-heavy SPAs to finish rendering
+    await swDelay(5000);
+
     const result = await new Promise((res, rej) =>
       chrome.debugger.sendCommand(
         { tabId: tab.id },
         'Page.printToPDF',
-        { printBackground: false, paperWidth: 8.27, paperHeight: 11.69,
+        { printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
           marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
         r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
       )
@@ -1191,7 +1434,70 @@ async function psTabToPdf(tab, folder, single = false) {
 }
 
 // Batch runner — all tabs for a given format
-async function psSaveTabs(tabs, format) {
+async function psQueueImages(tabs) {
+  const allowed = (tabs || []).filter(t =>
+    t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
+  );
+  const folder = psTimestamp();
+  const { _blockSelector } = await chrome.storage.local.get('_blockSelector');
+  let total = 0;
+  for (const tab of allowed) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (sel) => {
+          const root = sel ? document.querySelector(sel) : document;
+          if (!root) return [];
+          const seen = new Set();
+          const srcs = [];
+          root.querySelectorAll('img').forEach(img => {
+            // regular src + lazy-load attributes
+            const candidates = [
+              img.src,
+              img.getAttribute('data-src'),
+              img.getAttribute('data-lazy'),
+              img.getAttribute('data-lazy-src'),
+              img.getAttribute('data-original'),
+              img.getAttribute('data-url'),
+            ];
+            // srcset — take the highest resolution url
+            const ss = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+            if (ss) {
+              const last = ss.trim().split(',').pop().trim().split(/\s+/)[0];
+              if (last) candidates.push(last);
+            }
+            for (const c of candidates) {
+              if (c && (c.startsWith('http://') || c.startsWith('https://')) && !seen.has(c)) {
+                seen.add(c);
+                srcs.push(c);
+              }
+            }
+          });
+          return srcs;
+        },
+        args: [_blockSelector || null]
+      });
+      const srcs = results?.[0]?.result || [];
+      const newItems = srcs.map((src, idx) => {
+        const safeTab = psSanitize(tab.title);
+        // derive filename from URL; add .jpg fallback if no extension
+        let name = src.split('/').pop().split('?')[0].split('#')[0] || `img_${idx}`;
+        if (!name.includes('.')) name += '.jpg';
+        return { src, filename: `images/${folder}/${safeTab}/${name}` };
+      });
+      if (newItems.length) {
+        const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+        await chrome.storage.local.set({ _imgQueue: [..._imgQueue, ...newItems] });
+        total += newItems.length;
+      }
+    } catch(e) {
+      console.warn('[psQueueImages] failed for', tab.title, e);
+    }
+  }
+  dbgLog('psQueueImages: queued', total, 'images from', allowed.length, 'tabs', _blockSelector ? `(block: ${_blockSelector})` : '(whole page)');
+}
+
+async function psSaveTabs(tabs, format, pdfMode = 'cdp') {
   const folder = psTimestamp();
   const allowed = (tabs || []).filter(t =>
     t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://')
@@ -1201,11 +1507,91 @@ async function psSaveTabs(tabs, format) {
     try {
       if (format === 'html') await psTabToHtml(tab, folder);
       else if (format === 'png')  await psTabToPng(tab, folder);
-      else if (format === 'pdf')  await psTabToPdf(tab, folder, allowed.length === 1);
+      else if (format === 'pdf')  await psTabToPdf(tab, folder, pdfMode === 'print');
     } catch (e) {
       console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
     }
   }
+}
+
+// Save a specific CSS block from all tabs as Markdown + images
+async function psSaveBlockAll(tabs, selector, saveAs = false) {
+  const folder = `block-save/${psTimestamp()}`;
+  const allowed = (tabs || []).filter(t =>
+    t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
+  );
+  dbgLog('psSaveBlockAll: selector=', selector, 'tabs=', allowed.length, 'folder=', folder);
+
+  for (const tab of allowed) {
+    try {
+      // 1. Get the block's outer HTML from the tab
+      const extractResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          return {
+            content: el.outerHTML,
+            title: document.title,
+            baseURI: document.baseURI,
+            pageTitle: document.title,
+            byline: null, excerpt: null, siteName: null,
+            keywords: [], math: {}
+          };
+        },
+        args: [selector]
+      });
+
+      const article = extractResult?.[0]?.result;
+      if (!article) {
+        dbgLog('psSaveBlockAll: block not found on', tab.title);
+        continue;
+      }
+
+      // 2. Convert block to Markdown (inject scripts + run in tab)
+      const options = await getOptions();
+      options.frontmatter = options.backmatter = '';
+      options.downloadImages = true;
+      options.imagePrefix = folder + '/images/';
+      options.saveAs = false;
+
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/turndown.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/turndown-plugin-gfm.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/convert-article.js'] });
+
+      const convResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (content, opts, art) => turndownInPage(content, opts, art),
+        args: [article.content, options, article]
+      });
+
+      const { markdown, imageList } = convResult?.[0]?.result || {};
+      if (!markdown) { dbgLog('psSaveBlockAll: no markdown for', tab.title); continue; }
+
+      // 3. Download images
+      for (const [src, filename] of Object.entries(imageList || {})) {
+        try {
+          await browser.downloads.download({ url: src, filename, saveAs: false, conflictAction: 'uniquify' });
+        } catch (e) { /* image might be CORS-blocked */ }
+      }
+
+      // 4. Save markdown file
+      const safeTitle = generateValidFileName(article.title) || 'page';
+      const mdUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(markdown)}`;
+      await browser.downloads.download({
+        url: mdUrl,
+        filename: `${folder}/${safeTitle}.txt`,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      });
+
+      dbgLog('psSaveBlockAll: saved', safeTitle);
+    } catch (e) {
+      dbgLog('psSaveBlockAll: error on', tab.title, e.message);
+      console.error('[block-save]', tab.title, e);
+    }
+  }
+  dbgLog('psSaveBlockAll: done');
 }
 
 // Recursive same-domain crawler
