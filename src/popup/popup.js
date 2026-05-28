@@ -317,3 +317,13 @@ document.getElementById('ps-pdf-all').addEventListener('click', async () => {
   psSend('ps-save-pdf', { tabs });
   psSetStatus('PDF export running in background...');
 });
+
+document.getElementById('ps-show-logs').addEventListener('click', async () => {
+  const { _debugLog = [] } = await browser.storage.local.get('_debugLog');
+  const text = _debugLog.length ? _debugLog.join('\n') : '(no logs yet)';
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  await browser.downloads.download({ url, filename: 'markdownload-debug.txt', saveAs: false });
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  psSetStatus('Log saved to downloads.');
+});

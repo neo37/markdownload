@@ -52,6 +52,10 @@ function getImageFilename(src, options, prependFilePath = true) {
 }
 
 function turndownInPage(content, options, article) {
+  // defaultEscape is set in background.js (SW context) but not in tab context — save it here if missing
+  if (!TurndownService.prototype.defaultEscape) {
+    TurndownService.prototype.defaultEscape = TurndownService.prototype.escape;
+  }
   if (options.turndownEscape) TurndownService.prototype.escape = TurndownService.prototype.defaultEscape;
   else TurndownService.prototype.escape = s => s;
 
@@ -163,7 +167,19 @@ function turndownInPage(content, options, article) {
     replacement: (content, node, opts) => convertToFencedCodeBlock(node, opts)
   });
 
-  let markdown = options.frontmatter + turndownService.turndown(content) + options.backmatter;
+  // Parse HTML here (page context always has DOMParser) and pass DOM node to
+  // TurndownService — bypasses turndown's internal htmlParser() which fails in SW.
+  let inputNode;
+  try {
+    const doc = new DOMParser().parseFromString(
+      '<x-md id="td-root">' + content + '</x-md>', 'text/html'
+    );
+    inputNode = doc.getElementById('td-root') || doc.body;
+  } catch (e) {
+    inputNode = content; // fallback: let turndown try with the string
+  }
+
+  let markdown = options.frontmatter + turndownService.turndown(inputNode) + options.backmatter;
   markdown = markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028\u2029\ufeff\ufff9-\ufffc]/g, '');
   return { markdown, imageList };
 }

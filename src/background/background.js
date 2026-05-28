@@ -4,6 +4,20 @@ browser.runtime.getPlatformInfo().then(async platformInfo => {
   console.info(platformInfo, browserInfo);
 });
 
+// Persistent debug log (ring buffer, max 200 lines) written to chrome.storage.local
+async function dbgLog(...args) {
+  const line = `[${new Date().toISOString()}] ` + args.map(a => {
+    try { return (typeof a === 'object') ? JSON.stringify(a) : String(a); } catch { return String(a); }
+  }).join(' ');
+  console.log('[DBG]', line);
+  try {
+    const { _debugLog = [] } = await chrome.storage.local.get('_debugLog');
+    _debugLog.push(line);
+    if (_debugLog.length > 200) _debugLog.splice(0, _debugLog.length - 200);
+    await chrome.storage.local.set({ _debugLog });
+  } catch(e) { /* storage full or unavailable */ }
+}
+
 // add notification listener for foreground page messages
 browser.runtime.onMessage.addListener(notify);
 // create context menus
@@ -340,6 +354,7 @@ async function convertArticleToMarkdown(article, downloadImages = null, tabId = 
   if (tabId) {
     // Run Turndown inside the tab where document/DOMParser are always available
     try {
+      dbgLog('convertArticleToMarkdown: injecting into tabId', tabId);
       await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/turndown.js'] });
       await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/turndown-plugin-gfm.js'] });
       await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/convert-article.js'] });
@@ -349,12 +364,15 @@ async function convertArticleToMarkdown(article, downloadImages = null, tabId = 
         args: [article.content, options, article]
       });
       result = results?.[0]?.result;
+      dbgLog('convertArticleToMarkdown: tab conversion ok, markdown length', result?.markdown?.length);
     } catch (e) {
+      dbgLog('convertArticleToMarkdown: tab conversion FAILED', e.message);
       console.error('Tab-based conversion failed, falling back to SW:', e);
     }
   }
 
   if (!result) {
+    dbgLog('convertArticleToMarkdown: falling back to SW turndown');
     result = turndown(article.content, options, article);
   }
 
@@ -425,9 +443,10 @@ async function preDownloadImages(imageList, markdown) {
 }
 
 // function to actually download the markdown file
-async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
+async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '', forceSilent = false) {
   // get the options
   const options = await getOptions();
+  if (forceSilent) options.saveAs = false;
   
   // download via the downloads API
   if (options.downloadMode == 'downloadsApi' && browser.downloads) {
@@ -584,7 +603,7 @@ async function notify(message, sender) {
   else if (message.type === 'ps-save-md-all') {
     message.tabs.forEach(tab => {
       const info = { menuItemId: 'download-markdown-all' };
-      downloadMarkdownFromContext(info, tab);
+      downloadMarkdownFromContext(info, tab, true); // silent=true: no save-as dialog for batch
     });
   }
 }
@@ -879,14 +898,14 @@ async function formatObsidianFolder(article) {
 }
 
 // function to download markdown, triggered by context menu
-async function downloadMarkdownFromContext(info, tab) {
+async function downloadMarkdownFromContext(info, tab, silent = false) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
   const { markdown, imageList } = await convertArticleToMarkdown(article, null, tab.id);
   // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
+  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder, silent); 
 
 }
 
@@ -1127,9 +1146,34 @@ async function psTabToPng(tab, folder) {
   return psDownloadBlob(psBase64ToBlob(b64, 'image/png'), `page-saver/${folder}/screenshots/${title}.png`);
 }
 
-// Save tab as PDF via browser print dialog (avoids black background from dark-mode pages)
-async function psTabToPdf(tab, folder) {
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.print() });
+// Save tab as PDF.
+// single=true → opens browser print dialog (user picks filename, no black bg)
+// single=false → CDP Page.printToPDF with printBackground:false → saves to downloads
+async function psTabToPdf(tab, folder, single = false) {
+  if (single) {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.print() });
+    return;
+  }
+  const title = psSanitize(tab.title);
+  await new Promise((res, rej) =>
+    chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
+      chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res()
+    )
+  );
+  try {
+    const result = await new Promise((res, rej) =>
+      chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        'Page.printToPDF',
+        { printBackground: false, paperWidth: 8.27, paperHeight: 11.69,
+          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
+        r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
+      )
+    );
+    return psDownloadBlob(psBase64ToBlob(result.data, 'application/pdf'), `page-saver/${folder}/pdf/${title}.pdf`);
+  } finally {
+    chrome.debugger.detach({ tabId: tab.id });
+  }
 }
 
 // Batch runner — all tabs for a given format
@@ -1143,7 +1187,7 @@ async function psSaveTabs(tabs, format) {
     try {
       if (format === 'html') await psTabToHtml(tab, folder);
       else if (format === 'png')  await psTabToPng(tab, folder);
-      else if (format === 'pdf')  await psTabToPdf(tab, folder);
+      else if (format === 'pdf')  await psTabToPdf(tab, folder, allowed.length === 1);
     } catch (e) {
       console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
     }
