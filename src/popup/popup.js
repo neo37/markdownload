@@ -465,17 +465,26 @@ urlModal.addEventListener('click', (e) => {
 
 document.getElementById('ps-url-collect').addEventListener('click', async () => {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => {
-      const seen = new Set();
-      return Array.from(document.querySelectorAll('a[href]'))
-        .map(a => a.href)
-        .filter(u => (u.startsWith('http://') || u.startsWith('https://')) && !seen.has(u) && seen.add(u));
-    }
-  });
-  const urls = results?.[0]?.result || [];
-  urlTextarea.value = urls.join('\n');
+  if (!tab || !tab.url || !tab.url.startsWith('http')) {
+    psSetStatus('Cannot collect links from this page.');
+    return;
+  }
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const seen = new Set();
+        return Array.from(document.querySelectorAll('a[href]'))
+          .map(a => a.href)
+          .filter(u => (u.startsWith('http://') || u.startsWith('https://')) && !seen.has(u) && seen.add(u));
+      }
+    });
+    const urls = results?.[0]?.result || [];
+    urlTextarea.value = urls.join('\n');
+    psSetStatus(`Collected ${urls.length} links.`);
+  } catch(e) {
+    psSetStatus('Failed to collect links: ' + e.message);
+  }
 });
 
 document.getElementById('ps-url-start').addEventListener('click', () => {
