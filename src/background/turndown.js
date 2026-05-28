@@ -563,18 +563,16 @@ var TurndownService = (function () {
    */
 
   function canParseHTMLNatively () {
-    var Parser = root.DOMParser;
+    // root.DOMParser may be undefined in SW (window.DOMParser not enumerable on self),
+    // so also check the bare global DOMParser
+    var Parser = root.DOMParser || (typeof DOMParser !== 'undefined' ? DOMParser : null);
+    if (!Parser) return false;
     var canParse = false;
-
-    // Adapted from https://gist.github.com/1129031
-    // Firefox/Opera/IE throw errors on unsupported types
     try {
-      // WebKit returns null on unsupported types
       if (new Parser().parseFromString('', 'text/html')) {
         canParse = true;
       }
     } catch (e) {}
-
     return canParse
   }
 
@@ -594,7 +592,9 @@ var TurndownService = (function () {
       } else {
         Parser.prototype.parseFromString = function (string) {
           if (typeof document === 'undefined') {
-            return new DOMParser().parseFromString(string, 'text/html')
+            var P = root.DOMParser || (typeof DOMParser !== 'undefined' ? DOMParser : null);
+            if (P) return new P().parseFromString(string, 'text/html');
+            throw new Error('No HTML parser available in this context');
           }
           var doc = document.implementation.createHTMLDocument('');
           doc.open();
@@ -618,7 +618,9 @@ var TurndownService = (function () {
     return useActiveX
   }
 
-  var HTMLParser = canParseHTMLNatively() ? root.DOMParser : createHTMLParser();
+  var HTMLParser = canParseHTMLNatively()
+    ? (root.DOMParser || (typeof DOMParser !== 'undefined' ? DOMParser : null))
+    : createHTMLParser();
 
   function RootNode (input, options) {
     var root;

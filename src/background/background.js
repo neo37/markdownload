@@ -432,7 +432,7 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
         // get the relative path of the markdown file (if any) for image path
         let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
         if(destPath && !destPath.endsWith('/')) destPath += '/';
-        Object.entries(imageList).forEach(async ([src, filename]) => {
+        Object.entries(imageList || {}).forEach(async ([src, filename]) => {
           // start the download of the image
           const imgId = await browser.downloads.download({
             url: src,
