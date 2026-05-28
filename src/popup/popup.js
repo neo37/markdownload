@@ -160,6 +160,11 @@ browser.storage.sync.get(defaultOptions).then(options => {
 }).then((tabs) => {
     var id = tabs[0].id;
     var url = tabs[0].url;
+    // Cannot inject scripts into chrome://, extension, or file:// pages
+    if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('about:')) {
+        showError('Cannot clip this page (restricted URL).');
+        return;
+    }
     chrome.scripting.executeScript({ target: { tabId: id }, files: ['/browser-polyfill.min.js'] })
     .then(() => {
         return chrome.scripting.executeScript({ target: { tabId: id }, files: ['/contentScript/contentScript.js'] });
