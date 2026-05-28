@@ -277,6 +277,7 @@ function getImageFilename(src, options, prependFilePath = true) {
 
 // function to replace placeholder strings with article info
 function textReplace(string, article, disallowedChars = null) {
+  if (!article) return string.replace(/{[^}]*}/g, '');
   for (const key in article) {
     if (article.hasOwnProperty(key) && key != "content") {
       let s = (article[key] || '') + '';
@@ -447,13 +448,13 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
   const options = await getOptions();
 
   if (options.downloadMode == 'downloadsApi' && browser.downloads) {
-    const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+    const url = `data:text/plain;charset=utf-8,${encodeURIComponent(markdown)}`;
     try {
       if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
       const safeTitle = generateValidFileName(title, options.disallowedChars) || 'untitled';
       const id = await browser.downloads.download({
         url: url,
-        filename: mdClipsFolder + safeTitle + ".md",
+        filename: mdClipsFolder + safeTitle + ".txt",
         saveAs: false,
         conflictAction: 'uniquify'
       });
@@ -461,22 +462,18 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       // add a listener for the download completion
       browser.downloads.onChanged.addListener(downloadListener(id, url));
 
-      // download images (if enabled)
+      // queue images for sequential download
       if (options.downloadImages) {
-        // get the relative path of the markdown file (if any) for image path
         let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
-        if(destPath && !destPath.endsWith('/')) destPath += '/';
-        Object.entries(imageList || {}).forEach(async ([src, filename]) => {
-          // start the download of the image
-          const imgId = await browser.downloads.download({
-            url: src,
-            // set a destination path (relative to md file)
-            filename: destPath ? destPath + filename : filename,
-            saveAs: false
-          })
-          // add a listener (so we can release the blob url)
-          browser.downloads.onChanged.addListener(downloadListener(imgId, src));
-        });
+        if (destPath && !destPath.endsWith('/')) destPath += '/';
+        const newItems = Object.entries(imageList || {}).map(([src, filename]) => ({
+          src,
+          filename: destPath ? destPath + filename : filename
+        }));
+        if (newItems.length) {
+          const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+          await chrome.storage.local.set({ _imgQueue: [..._imgQueue, ...newItems] });
+        }
       }
     }
     catch (err) {
@@ -514,6 +511,39 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       // the page, for example if the tab is a privileged page.
       console.error("Failed to execute script: " + error);
     };
+  }
+}
+
+async function processImgQueue() {
+  const { _imgQueueRunning } = await chrome.storage.local.get('_imgQueueRunning');
+  if (_imgQueueRunning) return;
+  await chrome.storage.local.set({ _imgQueueRunning: true });
+  try {
+    while (true) {
+      const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+      if (!_imgQueue.length) break;
+      const [item, ...rest] = _imgQueue;
+      await chrome.storage.local.set({ _imgQueue: rest });
+      try {
+        const id = await browser.downloads.download({
+          url: item.src, filename: item.filename, saveAs: false, conflictAction: 'uniquify'
+        });
+        await new Promise(resolve => {
+          const listener = (delta) => {
+            if (delta.id === id && delta.state &&
+                (delta.state.current === 'complete' || delta.state.current === 'interrupted')) {
+              browser.downloads.onChanged.removeListener(listener);
+              resolve();
+            }
+          };
+          browser.downloads.onChanged.addListener(listener);
+        });
+      } catch(e) {
+        console.warn('[imgQueue] failed', item.filename, e);
+      }
+    }
+  } finally {
+    await chrome.storage.local.set({ _imgQueueRunning: false });
   }
 }
 
@@ -622,6 +652,12 @@ async function notify(message, sender) {
   }
   else if (message.type === 'ps-save-block-all') {
     psSaveBlockAll(message.tabs, message.selector, message.saveAs);
+  }
+  else if (message.type === 'ps-img-queue-start') {
+    processImgQueue();
+  }
+  else if (message.type === 'ps-queue-images') {
+    psQueueImages(message.tabs);
   }
 }
 
@@ -920,10 +956,8 @@ async function downloadMarkdownFromContext(info, tab) {
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
   const { markdown, imageList } = await convertArticleToMarkdown(article, null, tab.id);
-  // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
-
+  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder);
 }
 
 // function to copy a tab url as a markdown link
@@ -1153,14 +1187,56 @@ async function psTabToHtml(tab, folder) {
 // Save tab as PNG screenshot
 async function psTabToPng(tab, folder) {
   const title = psSanitize(tab.title);
-  // Activate tab briefly (required for captureVisibleTab)
   const [prev] = await browser.tabs.query({ active: true, currentWindow: true });
   await browser.tabs.update(tab.id, { active: true });
-  await new Promise(r => setTimeout(r, 400));
-  const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  await new Promise(r => setTimeout(r, 500));
+
+  // get page and viewport dimensions
+  const [dimsResult] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => ({
+      scrollHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+    })
+  });
+  const { scrollHeight, innerHeight } = dimsResult.result;
+
+  // scroll to top before starting
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) });
+  await new Promise(r => setTimeout(r, 250));
+
+  const shots = [];
+  let scrollY = 0;
+
+  while (true) {
+    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    shots.push(dataUrl.split(',')[1]);
+
+    const nextY = scrollY + innerHeight;
+    if (nextY >= scrollHeight) break;
+    scrollY = nextY;
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (y) => window.scrollTo(0, y),
+      args: [scrollY]
+    });
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // restore scroll and previous tab
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) });
   if (prev && prev.id !== tab.id) await browser.tabs.update(prev.id, { active: true });
-  const b64 = dataUrl.split(',')[1];
-  return psDownloadBlob(psBase64ToBlob(b64, 'image/png'), `page-saver/${folder}/screenshots/${title}.png`);
+
+  // save: single page → title.png, multiple → title/001.png title/002.png ...
+  if (shots.length === 1) {
+    return psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'),
+      `page-saver/${folder}/screenshots/${title}.png`);
+  }
+  for (let i = 0; i < shots.length; i++) {
+    const num = String(i + 1).padStart(3, '0');
+    await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'),
+      `page-saver/${folder}/screenshots/${title}/${num}.png`);
+  }
 }
 
 // Save tab as PDF.
@@ -1171,6 +1247,8 @@ async function psTabToPdf(tab, folder, single = false) {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.print() });
     return;
   }
+  // wait for JS-rendered content to finish loading
+  await new Promise(r => setTimeout(r, 7000));
   const title = psSanitize(tab.title);
   await new Promise((res, rej) =>
     chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
@@ -1194,6 +1272,39 @@ async function psTabToPdf(tab, folder, single = false) {
 }
 
 // Batch runner — all tabs for a given format
+async function psQueueImages(tabs) {
+  const allowed = (tabs || []).filter(t =>
+    t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
+  );
+  const folder = psTimestamp();
+  let total = 0;
+  for (const tab of allowed) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => Array.from(document.querySelectorAll('img[src]'))
+          .map(img => img.src)
+          .filter(src => src.startsWith('http://') || src.startsWith('https://'))
+          .filter((v, i, a) => a.indexOf(v) === i)
+      });
+      const srcs = results?.[0]?.result || [];
+      const newItems = srcs.map(src => {
+        const name = src.split('/').pop().split('?')[0] || 'image';
+        const safeTab = psSanitize(tab.title);
+        return { src, filename: `images/${folder}/${safeTab}/${name}` };
+      });
+      if (newItems.length) {
+        const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
+        await chrome.storage.local.set({ _imgQueue: [..._imgQueue, ...newItems] });
+        total += newItems.length;
+      }
+    } catch(e) {
+      console.warn('[psQueueImages] failed for', tab.title, e);
+    }
+  }
+  dbgLog('psQueueImages: queued', total, 'images from', allowed.length, 'tabs');
+}
+
 async function psSaveTabs(tabs, format) {
   const folder = psTimestamp();
   const allowed = (tabs || []).filter(t =>
@@ -1274,11 +1385,11 @@ async function psSaveBlockAll(tabs, selector, saveAs = false) {
 
       // 4. Save markdown file
       const safeTitle = generateValidFileName(article.title) || 'page';
-      const mdUrl = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+      const mdUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(markdown)}`;
       await browser.downloads.download({
         url: mdUrl,
-        filename: `${folder}/${safeTitle}.md`,
-        saveAs: saveAs,
+        filename: `${folder}/${safeTitle}.txt`,
+        saveAs: false,
         conflictAction: 'uniquify'
       });
 

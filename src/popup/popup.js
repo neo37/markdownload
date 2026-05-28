@@ -3,6 +3,7 @@
 var selectedText = null;
 var imageList = null;
 var mdClipsFolder = '';
+var articleLinks = [];
 
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
 // set up event handlers
@@ -195,7 +196,8 @@ function sendDownloadMessage(text) {
                 title: document.getElementById("title").value,
                 tab: tabs[0],
                 imageList: imageList,
-                mdClipsFolder: mdClipsFolder
+                mdClipsFolder: mdClipsFolder,
+                links: articleLinks
             };
             return browser.runtime.sendMessage(message);
         });
@@ -228,6 +230,7 @@ function notify(message) {
         document.getElementById("title").value = message.article.title;
         imageList = message.imageList;
         mdClipsFolder = message.mdClipsFolder;
+        articleLinks = message.article.links || [];
         
         // show the hidden elements
         document.getElementById("container").style.display = 'flex';
@@ -319,6 +322,59 @@ document.getElementById('ps-pdf-all').addEventListener('click', async () => {
   psSetStatus('PDF export running in background...');
 });
 
+document.getElementById('ps-tabs-txt').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  const lines = tabs
+    .filter(t => t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:'))
+    .map(t => `${t.title}\n${t.url}`)
+    .join('\n\n');
+  const url = `data:text/plain;charset=utf-8,${encodeURIComponent(lines)}`;
+  await browser.downloads.download({ url, filename: `tabs.txt`, saveAs: false, conflictAction: 'uniquify' });
+  psSetStatus('Saved tabs.txt');
+});
+
+document.getElementById('ps-queue-imgs-one').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  await psSend('ps-queue-images', { tabs: [tab] });
+  await refreshImgQueueCount();
+  psSetStatus('Images queued from current tab.');
+});
+
+document.getElementById('ps-queue-imgs-all').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  await psSend('ps-queue-images', { tabs });
+  await refreshImgQueueCount();
+  psSetStatus(`Images queued from ${tabs.length} tabs.`);
+});
+
+// ── Image queue ───────────────────────────────────────────────────────────────
+
+async function refreshImgQueueCount() {
+  const { _imgQueue = [] } = await browser.storage.local.get('_imgQueue');
+  document.getElementById('ps-img-queue-count').textContent = _imgQueue.length;
+}
+
+refreshImgQueueCount();
+
+document.getElementById('ps-img-queue-start').addEventListener('click', async () => {
+  const { _imgQueue = [] } = await browser.storage.local.get('_imgQueue');
+  if (!_imgQueue.length) { psSetStatus('Queue is empty.'); return; }
+  psSetStatus(`Downloading ${_imgQueue.length} images one by one…`);
+  psSend('ps-img-queue-start');
+  // poll count while downloading
+  const interval = setInterval(async () => {
+    const { _imgQueue: q = [] } = await browser.storage.local.get('_imgQueue');
+    document.getElementById('ps-img-queue-count').textContent = q.length;
+    if (!q.length) { clearInterval(interval); psSetStatus('All images downloaded.'); }
+  }, 800);
+});
+
+document.getElementById('ps-img-queue-clear').addEventListener('click', async () => {
+  await browser.storage.local.set({ _imgQueue: [] });
+  refreshImgQueueCount();
+  psSetStatus('Queue cleared.');
+});
+
 // ── Block picker ──────────────────────────────────────────────────────────────
 
 const pickBtn    = document.getElementById('ps-pick-block');
@@ -382,9 +438,8 @@ blockMdBtn.addEventListener('click', async () => {
   const selector = selectorInput.value.trim();
   if (!selector) return;
   const tabs = await browser.tabs.query({ currentWindow: true });
-  const saveAs = document.getElementById('ps-block-saveas').checked;
   psSetStatus(`Saving block from ${tabs.length} tabs…`);
-  psSend('ps-save-block-all', { tabs, selector, saveAs });
+  psSend('ps-save-block-all', { tabs, selector, saveAs: false });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
