@@ -1156,26 +1156,38 @@ function psBase64ToBlob(b64, mime) {
 }
 
 
+function swDelay(ms) {
+  // Keeps the service worker alive during long waits by pinging storage
+  return new Promise(resolve => {
+    const start = Date.now();
+    const tick = () => {
+      const remaining = ms - (Date.now() - start);
+      if (remaining <= 0) { resolve(); return; }
+      chrome.storage.local.get('_ka', () => setTimeout(tick, Math.min(remaining, 20000)));
+    };
+    tick();
+  });
+}
+
 async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true) {
   if (mode === 'open') {
-    for (const url of urls) {
-      browser.tabs.create({ url, active: false });
-      await new Promise(r => setTimeout(r, delaySec * 1000));
+    for (let i = 0; i < urls.length; i++) {
+      if (i > 0) await swDelay(delaySec * 1000);
+      browser.tabs.create({ url: urls[i], active: false });
     }
     return;
   }
 
   const folder = psTimestamp();
-
   const [prevActive] = await browser.tabs.query({ active: true, currentWindow: true });
 
-  for (const url of urls) {
+  for (let i = 0; i < urls.length; i++) {
+    if (i > 0) await swDelay(delaySec * 1000);
     let tab;
     try {
-      // open active so JS-heavy SPAs render (some block background tabs)
-      tab = await browser.tabs.create({ url, active: true });
+      tab = await browser.tabs.create({ url: urls[i], active: true });
       await waitForTabLoad(tab.id);
-      await new Promise(r => setTimeout(r, 1500));
+      await swDelay(1500);
 
       if (mode === 'markdown') {
         await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
@@ -1187,16 +1199,13 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
         await psTabToPdf(tab, folder, false);
       }
     } catch(e) {
-      console.error('[psOpenUrlList] failed for', url, e);
+      console.error('[psOpenUrlList] failed for', urls[i], e);
     } finally {
       if (tab && closeTabs) {
         browser.tabs.remove(tab.id).catch(() => {});
-        // restore previous tab
         if (prevActive) browser.tabs.update(prevActive.id, { active: true }).catch(() => {});
       }
     }
-
-    await new Promise(r => setTimeout(r, delaySec * 1000));
   }
 }
 
@@ -1333,17 +1342,41 @@ async function psQueueImages(tabs) {
         func: (sel) => {
           const root = sel ? document.querySelector(sel) : document;
           if (!root) return [];
-          return Array.from(root.querySelectorAll('img[src]'))
-            .map(img => img.src)
-            .filter(src => src.startsWith('http://') || src.startsWith('https://'))
-            .filter((v, i, a) => a.indexOf(v) === i);
+          const seen = new Set();
+          const srcs = [];
+          root.querySelectorAll('img').forEach(img => {
+            // regular src + lazy-load attributes
+            const candidates = [
+              img.src,
+              img.getAttribute('data-src'),
+              img.getAttribute('data-lazy'),
+              img.getAttribute('data-lazy-src'),
+              img.getAttribute('data-original'),
+              img.getAttribute('data-url'),
+            ];
+            // srcset — take the highest resolution url
+            const ss = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+            if (ss) {
+              const last = ss.trim().split(',').pop().trim().split(/\s+/)[0];
+              if (last) candidates.push(last);
+            }
+            for (const c of candidates) {
+              if (c && (c.startsWith('http://') || c.startsWith('https://')) && !seen.has(c)) {
+                seen.add(c);
+                srcs.push(c);
+              }
+            }
+          });
+          return srcs;
         },
         args: [_blockSelector || null]
       });
       const srcs = results?.[0]?.result || [];
-      const newItems = srcs.map(src => {
-        const name = src.split('/').pop().split('?')[0] || 'image';
+      const newItems = srcs.map((src, idx) => {
         const safeTab = psSanitize(tab.title);
+        // derive filename from URL; add .jpg fallback if no extension
+        let name = src.split('/').pop().split('?')[0].split('#')[0] || `img_${idx}`;
+        if (!name.includes('.')) name += '.jpg';
         return { src, filename: `images/${folder}/${safeTab}/${name}` };
       });
       if (newItems.length) {
