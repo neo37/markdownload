@@ -4,7 +4,6 @@ importScripts(
   'moment.min.js',
   'turndown.js',
   'turndown-plugin-gfm.js',
-  'Readability.js',
   '../shared/context-menus.js',
   '../shared/default-options.js',
   'background.js'

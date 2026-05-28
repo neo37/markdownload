@@ -2,6 +2,8 @@
 
 > **Fork of [deathau/markdownload](https://github.com/deathau/markdownload) by [@deathau](https://github.com/deathau)**
 > Extended by [@neo37](https://github.com/neo37) — Manifest V3 upgrade + bulk save features.
+>
+> **Primary use case: downloading entire wikis, documentation sites, or knowledge bases to local Markdown/HTML/PDF files.**
 
 ## How to use (Chrome)
 
@@ -24,6 +26,7 @@ All files land in `~/Downloads/page-saver/YYYY-MM-DD_HH-mm/` — each session ge
 - **Bulk save** — current tab or all open tabs → Markdown / HTML / PNG / PDF
 - **Silent PDF export** via Chrome DevTools Protocol (`Page.printToPDF`), no print dialog
 - **Timestamped output folders** — sessions never overwrite each other
+- **Recursive domain crawler** — opens every page on the current domain by following links recursively, with URL normalization and deduplication (no duplicate pages opened). Useful for archiving an entire wiki or documentation site. Includes a Stop button to halt the crawl at any time.
 
 ---
 

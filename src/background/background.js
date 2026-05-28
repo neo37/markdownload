@@ -533,19 +533,25 @@ function base64EncodeUnicode(str) {
 }
 
 //function that handles messages from the injected script into the site
-async function notify(message) {
+async function notify(message, sender) {
   const options = await this.getOptions();
   // message for initial clipping of the dom
   if (message.type == "clip") {
-    // get the article info from the passed in dom
-    const article = await getArticleFromDom(message.dom);
-
-    // if selection info was passed in (and we're to clip the selection)
-    // replace the article content
-    if (message.selection && message.clipSelection) {
-      article.content = message.selection;
+    // Use the tab context to parse with Readability (DOMParser not available in MV3 SW)
+    const tabId = sender && sender.tab && sender.tab.id;
+    let article;
+    if (tabId) {
+      article = await getArticleFromContent(tabId, !!(message.selection && message.clipSelection));
+    } else {
+      // fallback: try to get the active tab
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab) {
+        article = await getArticleFromContent(activeTab.id, !!(message.selection && message.clipSelection));
+      }
     }
-    
+
+    if (!article) return;
+
     // convert the article to markdown
     const { markdown, imageList } = await convertArticleToMarkdown(article);
 
@@ -563,6 +569,12 @@ async function notify(message) {
     downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
   }
   // ── Page Saver handlers ──────────────────────────────────────────────────
+  else if (message.type === 'ps-crawl-domain') {
+    psCrawlDomain(message.tabId, message.url);
+  }
+  else if (message.type === 'ps-stop-crawl') {
+    _crawlState.running = false;
+  }
   else if (message.type === 'ps-open-links') {
     psOpenLinks(message.tabId);
   }
@@ -818,23 +830,24 @@ async function getArticleFromDom(domString) {
 // get Readability article info from the content of the tab id passed in
 // `selection` is a bool indicating whether we should just get the selected text
 async function getArticleFromContent(tabId, selection = false) {
-  // run the content script function to get the details
-  const results = await chrome.scripting.executeScript({target: {tabId: tabId}, func: () => getSelectionAndDom()});
-
-  // make sure we actually got a valid result
-  if (results && results[0].result && results[0].result.dom) {
-    const article = await getArticleFromDom(results[0].result.dom, selection);
-
-    // if we're to grab the selection, and we've selected something,
-    // replace the article content with the selection
-    if (selection && results[0].result.selection) {
-      article.content = results[0].result.selection;
-    }
-
-    //return the article
-    return article;
+  // inject dependencies into the tab (which has document/DOMParser)
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['/background/Readability.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['/contentScript/get-article.js'] });
+  } catch(e) {
+    console.warn('Script injection warning:', e.message);
   }
-  else return null;
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel) => {
+      if (typeof getArticleFromCurrentPage !== 'function') return null;
+      return getArticleFromCurrentPage(sel);
+    },
+    args: [selection]
+  });
+
+  return results?.[0]?.result || null;
 }
 
 // function to apply the title template
@@ -1165,4 +1178,96 @@ async function psSaveTabs(tabs, format) {
       console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
     }
   }
+}
+
+// Recursive same-domain crawler
+const _crawlState = { running: false, visited: new Set(), queue: [] };
+
+async function psCrawlDomain(startTabId, startUrl) {
+  if (_crawlState.running) return; // prevent double-start
+  _crawlState.running = true;
+  _crawlState.visited = new Set();
+  _crawlState.queue = [];
+
+  const domain = new URL(startUrl).hostname;
+  _crawlState.visited.add(normalizeUrl(startUrl));
+
+  const firstLinks = await psGetSameDomainLinks(startTabId, domain, _crawlState.visited);
+  _crawlState.queue.push(...firstLinks);
+
+  while (_crawlState.running && _crawlState.queue.length > 0) {
+    const url = _crawlState.queue.shift();
+    const norm = normalizeUrl(url);
+    if (_crawlState.visited.has(norm)) continue;
+    _crawlState.visited.add(norm);
+
+    // open tab and wait for it to load
+    const tab = await chrome.tabs.create({ url, active: false });
+    await waitForTabLoad(tab.id);
+    await new Promise(r => setTimeout(r, 2000)); // let JS render
+
+    try {
+      const newLinks = await psGetSameDomainLinks(tab.id, domain, _crawlState.visited);
+      _crawlState.queue.push(...newLinks);
+    } catch(e) {
+      console.warn('[crawl] could not get links from', url, e.message);
+    }
+
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  _crawlState.running = false;
+}
+
+function normalizeUrl(url) {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    // remove trailing slash for consistency
+    u.pathname = u.pathname.replace(/\/$/, '') || '/';
+    return u.toString();
+  } catch { return url; }
+}
+
+async function psGetSameDomainLinks(tabId, domain, visited) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (domain) => {
+      const seen = new Set();
+      return Array.from(document.querySelectorAll('a[href]'))
+        .map(a => { try { return new URL(a.href, location.href).href; } catch { return null; } })
+        .filter(url => {
+          if (!url) return false;
+          try {
+            const u = new URL(url);
+            if (u.hostname !== domain) return false;
+            if (u.hash && u.pathname === location.pathname) return false; // anchor-only link
+            const key = u.origin + u.pathname;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          } catch { return false; }
+        });
+    },
+    args: [domain]
+  });
+  const links = results?.[0]?.result || [];
+  return links.filter(url => !visited.has(normalizeUrl(url)));
+}
+
+function waitForTabLoad(tabId) {
+  return new Promise(resolve => {
+    chrome.tabs.get(tabId, tab => {
+      if (tab && tab.status === 'complete') { resolve(); return; }
+      const listener = (id, info) => {
+        if (id === tabId && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      // safety timeout
+      setTimeout(resolve, 15000);
+    });
+  });
 }

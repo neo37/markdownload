@@ -255,6 +255,17 @@ document.getElementById('ps-open-links').addEventListener('click', async () => {
   psSetStatus('Opening links...');
 });
 
+document.getElementById('ps-crawl-domain').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  psSend('ps-crawl-domain', { tabId: tab.id, url: tab.url });
+  psSetStatus('Crawling domain: ' + new URL(tab.url).hostname + ' …');
+});
+
+document.getElementById('ps-stop-crawl').addEventListener('click', () => {
+  psSend('ps-stop-crawl');
+  psSetStatus('Crawl stopped.');
+});
+
 document.getElementById('ps-html-one').addEventListener('click', async () => {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   psSetStatus('Saving HTML...');
