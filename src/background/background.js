@@ -1155,20 +1155,6 @@ function psBase64ToBlob(b64, mime) {
   return new Blob([arr], { type: mime });
 }
 
-// Open all links from a tab with 3-second delay between each
-function waitForTabLoad(tabId) {
-  return new Promise(resolve => {
-    function listener(id, changeInfo) {
-      if (id === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    }
-    chrome.tabs.onUpdated.addListener(listener);
-    // fallback timeout 30s
-    setTimeout(resolve, 30000);
-  });
-}
 
 async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true) {
   if (mode === 'open') {
