@@ -1180,21 +1180,27 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
 
   const folder = psTimestamp();
   const [prevActive] = await browser.tabs.query({ active: true, currentWindow: true });
+  const { _blockSelector } = await chrome.storage.local.get('_blockSelector');
+  const sel = _blockSelector || null;
 
   for (let i = 0; i < urls.length; i++) {
-    if (i > 0) await swDelay(delaySec * 1000);
     let tab;
     try {
       tab = await browser.tabs.create({ url: urls[i], active: true });
       await waitForTabLoad(tab.id);
-      await swDelay(1500);
+      // user-configured delay after load — lets JS-heavy pages finish rendering
+      await swDelay(delaySec * 1000);
 
       if (mode === 'markdown') {
-        await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
+        if (sel) {
+          await psSaveBlockAll([tab], sel, false);
+        } else {
+          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
+        }
       } else if (mode === 'images') {
-        await psQueueImages([tab]);
+        await psQueueImages([tab]);  // already reads _blockSelector internally
       } else if (mode === 'screenshot') {
-        await psTabToPng(tab, folder);
+        await psTabToPng(tab, folder, sel);
       } else if (mode === 'pdf') {
         await psTabToPdf(tab, folder, false);
       }
@@ -1206,6 +1212,8 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
         if (prevActive) browser.tabs.update(prevActive.id, { active: true }).catch(() => {});
       }
     }
+
+    await swDelay(500); // brief pause between URLs
   }
 }
 
@@ -1240,29 +1248,37 @@ async function psTabToHtml(tab, folder) {
   return psDownloadBlob(blob, `page-saver/${folder}/html/${title}.html`);
 }
 
-// Save tab as PNG screenshot
-async function psTabToPng(tab, folder) {
+// Save tab as scrolling PNG screenshots, optionally scoped to a CSS selector
+async function psTabToPng(tab, folder, blockSelector = null) {
   const title = psSanitize(tab.title);
   const [prev] = await browser.tabs.query({ active: true, currentWindow: true });
   await browser.tabs.update(tab.id, { active: true });
-  await new Promise(r => setTimeout(r, 500));
+  await swDelay(500);
 
-  // get page and viewport dimensions
+  // get dimensions — if block selector, measure the element's scroll range
   const [dimsResult] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => ({
-      scrollHeight: document.documentElement.scrollHeight,
-      innerHeight: window.innerHeight,
-    })
+    func: (sel) => {
+      if (sel) {
+        const el = document.querySelector(sel);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const absTop = rect.top + window.scrollY;
+          return { startY: absTop, scrollHeight: absTop + el.scrollHeight, innerHeight: window.innerHeight };
+        }
+      }
+      return { startY: 0, scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight };
+    },
+    args: [blockSelector || null]
   });
-  const { scrollHeight, innerHeight } = dimsResult.result;
+  const { startY, scrollHeight, innerHeight } = dimsResult.result;
 
-  // scroll to top before starting
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) });
-  await new Promise(r => setTimeout(r, 250));
+  // scroll to start
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
+  await swDelay(300);
 
   const shots = [];
-  let scrollY = 0;
+  let scrollY = startY;
 
   while (true) {
     const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
@@ -1271,27 +1287,20 @@ async function psTabToPng(tab, folder) {
     const nextY = scrollY + innerHeight;
     if (nextY >= scrollHeight) break;
     scrollY = nextY;
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (y) => window.scrollTo(0, y),
-      args: [scrollY]
-    });
-    await new Promise(r => setTimeout(r, 300));
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [scrollY] });
+    await swDelay(350);
   }
 
-  // restore scroll and previous tab
+  // restore
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) });
   if (prev && prev.id !== tab.id) await browser.tabs.update(prev.id, { active: true });
 
-  // save: single page → title.png, multiple → title/001.png title/002.png ...
+  const base = blockSelector ? `page-saver/${folder}/screenshots/${title}-block` : `page-saver/${folder}/screenshots/${title}`;
   if (shots.length === 1) {
-    return psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'),
-      `page-saver/${folder}/screenshots/${title}.png`);
+    return psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'), base + '.png');
   }
   for (let i = 0; i < shots.length; i++) {
-    const num = String(i + 1).padStart(3, '0');
-    await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'),
-      `page-saver/${folder}/screenshots/${title}/${num}.png`);
+    await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'), `${base}/${String(i + 1).padStart(3, '0')}.png`);
   }
 }
 
