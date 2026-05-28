@@ -1249,78 +1249,86 @@ async function psTabToHtml(tab, folder) {
 }
 
 // Save tab as scrolling PNG screenshots, optionally scoped to a CSS selector
+function cdpCmd(tabId, method, params = {}) {
+  return new Promise((res, rej) =>
+    chrome.debugger.sendCommand({ tabId }, method, params,
+      r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r))
+  );
+}
+
 async function psTabToPng(tab, folder, blockSelector = null) {
   const title = psSanitize(tab.title);
 
-  // activate tab and focus its window — both required for captureVisibleTab
   const tabInfo = await browser.tabs.get(tab.id);
   const windowId = tabInfo.windowId;
   await browser.tabs.update(tab.id, { active: true });
   await chrome.windows.update(windowId, { focused: true });
   await swDelay(600);
 
-  const [prev] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+  // attach debugger for mouse/scroll simulation
+  await new Promise((res, rej) =>
+    chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
+      chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res())
+  );
 
-  // get dimensions — if block selector, measure the element's scroll range
-  const [dimsResult] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (sel) => {
-      if (sel) {
-        const el = document.querySelector(sel);
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          const absTop = rect.top + window.scrollY;
-          return { startY: absTop, scrollHeight: absTop + el.scrollHeight, innerHeight: window.innerHeight };
+  try {
+    // get dimensions
+    const [dimsResult] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (sel) => {
+        if (sel) {
+          const el = document.querySelector(sel);
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            const absTop = rect.top + window.scrollY;
+            return { startY: absTop, scrollHeight: absTop + el.scrollHeight, innerHeight: window.innerHeight, innerWidth: window.innerWidth };
+          }
         }
-      }
-      return { startY: 0, scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight };
-    },
-    args: [blockSelector || null]
-  });
-  const { startY, scrollHeight, innerHeight } = dimsResult?.result ?? { startY: 0, scrollHeight: 0, innerHeight: 800 };
+        return { startY: 0, scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight, innerWidth: window.innerWidth };
+      },
+      args: [blockSelector || null]
+    });
+    const { startY, scrollHeight, innerHeight, innerWidth } = dimsResult?.result ?? { startY: 0, scrollHeight: 800, innerHeight: 800, innerWidth: 1280 };
+    const cx = Math.floor(innerWidth / 2);
+    const cy = Math.floor(innerHeight / 2);
 
-  // scroll to start
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
-  await swDelay(400);
+    // scroll to start position
+    await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: startY });
+    await swDelay(400);
 
-  const shots = [];
-  let scrollY = startY;
+    const shots = [];
+    let scrollY = startY;
 
-  while (true) {
-    try {
+    while (true) {
+      // capture current viewport
       const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
       shots.push(dataUrl.split(',')[1]);
-    } catch(e) {
-      console.warn('[screenshot] captureVisibleTab failed:', e.message);
-      // re-focus and retry once
-      await chrome.windows.update(windowId, { focused: true });
-      await swDelay(300);
-      try {
-        const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
-        shots.push(dataUrl.split(',')[1]);
-      } catch(e2) {
-        console.warn('[screenshot] retry also failed, stopping', e2.message);
-        break;
-      }
+
+      const nextY = scrollY + innerHeight;
+      if (nextY >= scrollHeight) break;
+
+      const delta = nextY - scrollY;
+      scrollY = nextY;
+
+      // click center to ensure focus, then scroll with mouse wheel
+      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
+      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
+      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: delta });
+      await swDelay(500);
     }
 
-    const nextY = scrollY + innerHeight;
-    if (nextY >= scrollHeight) break;
-    scrollY = nextY;
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [scrollY] });
-    await swDelay(400);
-  }
-
-  // restore
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) });
-  if (prev && prev.id !== tab.id) await browser.tabs.update(prev.id, { active: true });
-
-  const base = blockSelector ? `page-saver/${folder}/screenshots/${title}-block` : `page-saver/${folder}/screenshots/${title}`;
-  if (shots.length === 1) {
-    return psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'), base + '.png');
-  }
-  for (let i = 0; i < shots.length; i++) {
-    await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'), `${base}/${String(i + 1).padStart(3, '0')}.png`);
+    const base = blockSelector
+      ? `page-saver/${folder}/screenshots/${title}-block`
+      : `page-saver/${folder}/screenshots/${title}`;
+    if (shots.length === 1) {
+      await psDownloadBlob(psBase64ToBlob(shots[0], 'image/png'), base + '.png');
+    } else {
+      for (let i = 0; i < shots.length; i++) {
+        await psDownloadBlob(psBase64ToBlob(shots[i], 'image/png'), `${base}/${String(i + 1).padStart(3, '0')}.png`);
+      }
+    }
+  } finally {
+    chrome.debugger.detach({ tabId: tab.id });
   }
 }
 
