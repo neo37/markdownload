@@ -1251,9 +1251,15 @@ async function psTabToHtml(tab, folder) {
 // Save tab as scrolling PNG screenshots, optionally scoped to a CSS selector
 async function psTabToPng(tab, folder, blockSelector = null) {
   const title = psSanitize(tab.title);
-  const [prev] = await browser.tabs.query({ active: true, currentWindow: true });
+
+  // activate tab and focus its window — both required for captureVisibleTab
+  const tabInfo = await browser.tabs.get(tab.id);
+  const windowId = tabInfo.windowId;
   await browser.tabs.update(tab.id, { active: true });
-  await swDelay(500);
+  await chrome.windows.update(windowId, { focused: true });
+  await swDelay(600);
+
+  const [prev] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
 
   // get dimensions — if block selector, measure the element's scroll range
   const [dimsResult] = await chrome.scripting.executeScript({
@@ -1271,25 +1277,31 @@ async function psTabToPng(tab, folder, blockSelector = null) {
     },
     args: [blockSelector || null]
   });
-  const { startY, scrollHeight, innerHeight } = dimsResult.result;
+  const { startY, scrollHeight, innerHeight } = dimsResult?.result ?? { startY: 0, scrollHeight: 0, innerHeight: 800 };
 
   // scroll to start
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
-  await swDelay(300);
+  await swDelay(400);
 
   const shots = [];
   let scrollY = startY;
-
-  // get the window that contains this tab (needed for captureVisibleTab)
-  const tabInfo = await browser.tabs.get(tab.id);
-  const windowId = tabInfo.windowId;
 
   while (true) {
     try {
       const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
       shots.push(dataUrl.split(',')[1]);
     } catch(e) {
-      console.warn('[screenshot] captureVisibleTab failed, skipping frame', e.message);
+      console.warn('[screenshot] captureVisibleTab failed:', e.message);
+      // re-focus and retry once
+      await chrome.windows.update(windowId, { focused: true });
+      await swDelay(300);
+      try {
+        const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
+        shots.push(dataUrl.split(',')[1]);
+      } catch(e2) {
+        console.warn('[screenshot] retry also failed, stopping', e2.message);
+        break;
+      }
     }
 
     const nextY = scrollY + innerHeight;
