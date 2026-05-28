@@ -462,17 +462,22 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
       // add a listener for the download completion
       browser.downloads.onChanged.addListener(downloadListener(id, url));
 
-      // queue images for sequential download
+      // download images directly (imageList may contain data: URLs — too large for storage queue)
       if (options.downloadImages) {
         let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
         if (destPath && !destPath.endsWith('/')) destPath += '/';
-        const newItems = Object.entries(imageList || {}).map(([src, filename]) => ({
-          src,
-          filename: destPath ? destPath + filename : filename
-        }));
-        if (newItems.length) {
-          const { _imgQueue = [] } = await chrome.storage.local.get('_imgQueue');
-          await chrome.storage.local.set({ _imgQueue: [..._imgQueue, ...newItems] });
+        for (const [src, filename] of Object.entries(imageList || {})) {
+          try {
+            const imgId = await browser.downloads.download({
+              url: src,
+              filename: destPath ? destPath + filename : filename,
+              saveAs: false,
+              conflictAction: 'uniquify'
+            });
+            browser.downloads.onChanged.addListener(downloadListener(imgId, src));
+          } catch(e) {
+            console.warn('[downloadMarkdown] image failed', filename, e);
+          }
         }
       }
     }
@@ -1223,17 +1228,15 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
         console.error('[psOpenUrlList] action failed for', urls[i], e);
       }
 
-      // queue images (separate try so it always runs, even if action above failed)
-      if (mode === 'markdown' || mode === 'images') {
+      // for images-only mode: queue from DOM then drain before tab closes
+      if (mode === 'images') {
         try {
           await psQueueImages([tab]);
         } catch(e) {
           console.warn('[psOpenUrlList] psQueueImages failed', e);
         }
+        await processImgQueueNow();
       }
-
-      // drain the queue before closing the tab
-      await processImgQueueNow();
 
     } catch(e) {
       console.error('[psOpenUrlList] failed for', urls[i], e);
