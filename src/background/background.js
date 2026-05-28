@@ -621,34 +621,33 @@ async function notify(message, sender) {
   }
   // message for triggering download
   else if (message.type == "download") {
-    downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
+    return downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
   }
   // ── Page Saver handlers ──────────────────────────────────────────────────
   else if (message.type === 'ps-crawl-domain') {
-    psCrawlDomain(message.tabId, message.url);
+    return psCrawlDomain(message.tabId, message.url);
   }
   else if (message.type === 'ps-stop-crawl') {
     _crawlState.running = false;
   }
   else if (message.type === 'ps-open-links') {
-    psOpenLinks(message.tabId);
+    return psOpenLinks(message.tabId);
   }
   else if (message.type === 'ps-save-html') {
-    psSaveTabs(message.tabs, 'html');
+    return psSaveTabs(message.tabs, 'html');
   }
   else if (message.type === 'ps-save-png') {
-    psSaveTabs(message.tabs, 'png');
+    return psSaveTabs(message.tabs, 'png');
   }
   else if (message.type === 'ps-save-pdf') {
-    psSaveTabs(message.tabs, 'pdf', message.pdfMode);
+    return psSaveTabs(message.tabs, 'pdf', message.pdfMode);
   }
   else if (message.type === 'ps-save-md-all') {
     const mdTabs = (message.tabs || []).filter(t =>
       t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
     );
     dbgLog('ps-save-md-all: processing', mdTabs.length, 'tabs');
-    // Sequential — await each tab so SW stays alive and errors don't cascade
-    ;(async () => {
+    return (async () => {
       for (const tab of mdTabs) {
         try {
           dbgLog('ps-save-md-all: saving tab', tab.id, tab.title);
@@ -663,23 +662,22 @@ async function notify(message, sender) {
     })();
   }
   else if (message.type === 'block-picked') {
-    // relay selector from content script → popup
     browser.runtime.sendMessage({ type: 'block-picked', selector: message.selector }).catch(() => {});
   }
   else if (message.type === 'block-pick-cancelled') {
     browser.runtime.sendMessage({ type: 'block-pick-cancelled' }).catch(() => {});
   }
   else if (message.type === 'ps-save-block-all') {
-    psSaveBlockAll(message.tabs, message.selector, message.saveAs);
+    return psSaveBlockAll(message.tabs, message.selector, message.saveAs);
   }
   else if (message.type === 'ps-img-queue-start') {
-    processImgQueue();
+    return processImgQueue();
   }
   else if (message.type === 'ps-open-url-list') {
-    psOpenUrlList(message.urls, message.delay, message.mode, message.closeTabs !== false);
+    return psOpenUrlList(message.urls, message.delay, message.mode, message.closeTabs !== false);
   }
   else if (message.type === 'ps-queue-images') {
-    psQueueImages(message.tabs);
+    return psQueueImages(message.tabs);
   }
 }
 
@@ -1355,7 +1353,7 @@ async function psTabToPng(tab, folder, blockSelector = null) {
       // click center for focus, then scroll down one viewport
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
-      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', { x: cx, y: cy, xDistance: 0, yDistance: innerHeight, speed: 800 });
+      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', { x: cx, y: cy, xDistance: 0, yDistance: -innerHeight, speed: 800 });
       await swDelay(600);
 
       // verify scroll actually moved; if stuck, break
