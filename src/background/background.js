@@ -443,26 +443,19 @@ async function preDownloadImages(imageList, markdown) {
 }
 
 // function to actually download the markdown file
-async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '', forceSilent = false) {
-  // get the options
+async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
   const options = await getOptions();
-  options.saveAs = false; // always auto-save to folder, never prompt
-  
-  // download via the downloads API
-  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
-    
-    // create a data url (blob URLs are not available in service workers)
-    const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
-  
-    try {
 
-      if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
+  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
+    const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+    try {
+      if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
       const safeTitle = generateValidFileName(title, options.disallowedChars) || 'untitled';
-      // start the download
       const id = await browser.downloads.download({
         url: url,
         filename: mdClipsFolder + safeTitle + ".md",
-        saveAs: options.saveAs
+        saveAs: false,
+        conflictAction: 'uniquify'
       });
 
       // add a listener for the download completion
@@ -610,7 +603,7 @@ async function notify(message, sender) {
       for (const tab of mdTabs) {
         try {
           dbgLog('ps-save-md-all: saving tab', tab.id, tab.title);
-          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab, true);
+          await downloadMarkdownFromContext({ menuItemId: 'download-markdown-all' }, tab);
           dbgLog('ps-save-md-all: done', tab.id);
         } catch (e) {
           dbgLog('ps-save-md-all: FAILED tab', tab.id, e.message);
@@ -922,14 +915,14 @@ async function formatObsidianFolder(article) {
 }
 
 // function to download markdown, triggered by context menu
-async function downloadMarkdownFromContext(info, tab, silent = false) {
+async function downloadMarkdownFromContext(info, tab) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
   const { markdown, imageList } = await convertArticleToMarkdown(article, null, tab.id);
   // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder, silent); 
+  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
 
 }
 
