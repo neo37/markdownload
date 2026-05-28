@@ -1,0 +1,11 @@
+importScripts(
+  '../browser-polyfill.min.js',
+  'apache-mime-types.js',
+  'moment.min.js',
+  'turndown.js',
+  'turndown-plugin-gfm.js',
+  'Readability.js',
+  '../shared/context-menus.js',
+  '../shared/default-options.js',
+  'background.js'
+);
