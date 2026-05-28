@@ -201,10 +201,10 @@
     <h2 data-lang="ru">Скачать</h2>
 
     <div class="btn-row">
-      <a class="download-btn" href="https://github.com/neo37/markdownload/releases/latest/download/markdownload-v3.4.0.zip" id="dl-zip">
+      <a class="download-btn" href="https://github.com/neo37/markdownload/releases/latest/download/markdownload-v3.6.0.zip" id="dl-zip">
         <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-        <span data-lang="en" class="visible">Download ZIP v3.4.0</span>
-        <span data-lang="ru">Скачать ZIP v3.4.0</span>
+        <span data-lang="en" class="visible">Download ZIP v3.6.0</span>
+        <span data-lang="ru">Скачать ZIP v3.6.0</span>
       </a>
       <a class="alt-btn" href="https://github.com/neo37/markdownload/releases/latest" target="_blank">
         <span data-lang="en" class="visible">All releases →</span>
@@ -385,8 +385,27 @@
         <div class="step-body">
           <strong>Scrolling screenshots — full-page capture</strong>
           Click <em>"Screenshot"</em> or use URL list in screenshot mode.
-          The extension scrolls the page from top to bottom, capturing each viewport.
+          Uses CDP mouse gestures to scroll — works on SPAs with virtual scrollers.
           Short pages save as <code>title.png</code>; long pages save as <code>title/001.png</code>, <code>002.png</code>...
+          Block selector scopes screenshots to the element's bounding box.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <strong>PDF — two modes</strong>
+          <em>Silent (CDP)</em>: saves automatically to Downloads, no dialog. Use for batch processing.
+          <em>Print dialog</em>: opens Chrome's print dialog — better rendering for JS-heavy pages.
+          Choose the mode with the radio buttons next to the PDF buttons.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <strong>Markdown + images together</strong>
+          In URL list Markdown mode, the extension saves the page as <code>.txt</code> and simultaneously
+          queues all images for download. If a block selector is active, only images inside that block are collected.
+          Press <em>"Download queue"</em> in the popup to download them one by one.
         </div>
       </div>
     </div>
@@ -424,8 +443,27 @@
         <div class="step-body">
           <strong>Скроллинг-скриншоты — полная страница</strong>
           Нажми <em>"Screenshot"</em> или используй список ссылок в режиме скриншотов.
-          Расширение прокручивает страницу сверху вниз, захватывая каждый экран.
-          Короткие страницы сохраняются как <code>title.png</code>; длинные — как <code>title/001.png</code>, <code>002.png</code>...
+          Расширение использует CDP-жесты мыши для прокрутки — работает даже на SPA с виртуальным скроллом.
+          Короткие страницы → <code>title.png</code>; длинные → <code>title/001.png</code>, <code>002.png</code>...
+          Селектор блока ограничивает скриншот областью элемента.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <strong>PDF — два режима</strong>
+          <em>Silent CDP</em>: сохраняется автоматически в Downloads без диалога. Удобно для пакетной обработки.
+          <em>Print dialog</em>: открывает стандартный диалог печати Chrome — лучший рендеринг для JS-страниц.
+          Переключай режим радиокнопками под кнопками PDF.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <strong>Markdown + картинки вместе</strong>
+          В режиме Markdown (список ссылок) расширение сохраняет страницу как <code>.txt</code> и одновременно
+          ставит все картинки в очередь. Если активен селектор блока — только картинки из этого блока.
+          Нажми <em>"Download queue"</em> в попапе для последовательного скачивания.
         </div>
       </div>
     </div>
