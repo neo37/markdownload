@@ -446,7 +446,7 @@ async function preDownloadImages(imageList, markdown) {
 async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '', forceSilent = false) {
   // get the options
   const options = await getOptions();
-  if (forceSilent) options.saveAs = false;
+  options.saveAs = false; // always auto-save to folder, never prompt
   
   // download via the downloads API
   if (options.downloadMode == 'downloadsApi' && browser.downloads) {
