@@ -1331,15 +1331,21 @@ async function psQueueImages(tabs) {
     t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
   );
   const folder = psTimestamp();
+  const { _blockSelector } = await chrome.storage.local.get('_blockSelector');
   let total = 0;
   for (const tab of allowed) {
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => Array.from(document.querySelectorAll('img[src]'))
-          .map(img => img.src)
-          .filter(src => src.startsWith('http://') || src.startsWith('https://'))
-          .filter((v, i, a) => a.indexOf(v) === i)
+        func: (sel) => {
+          const root = sel ? document.querySelector(sel) : document;
+          if (!root) return [];
+          return Array.from(root.querySelectorAll('img[src]'))
+            .map(img => img.src)
+            .filter(src => src.startsWith('http://') || src.startsWith('https://'))
+            .filter((v, i, a) => a.indexOf(v) === i);
+        },
+        args: [_blockSelector || null]
       });
       const srcs = results?.[0]?.result || [];
       const newItems = srcs.map(src => {
@@ -1356,7 +1362,7 @@ async function psQueueImages(tabs) {
       console.warn('[psQueueImages] failed for', tab.title, e);
     }
   }
-  dbgLog('psQueueImages: queued', total, 'images from', allowed.length, 'tabs');
+  dbgLog('psQueueImages: queued', total, 'images from', allowed.length, 'tabs', _blockSelector ? `(block: ${_blockSelector})` : '(whole page)');
 }
 
 async function psSaveTabs(tabs, format) {
