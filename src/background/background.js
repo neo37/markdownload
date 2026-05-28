@@ -1345,7 +1345,7 @@ async function psTabToPng(tab, folder, blockSelector = null) {
       await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', {
         x: cx, y: cy,
         xDistance: 0,
-        yDistance: -innerHeight,  // negative = scroll down
+        yDistance: innerHeight,
         speed: 1000
       });
       await swDelay(600);
