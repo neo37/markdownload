@@ -289,11 +289,15 @@ document.getElementById('ps-png-one').addEventListener('click', async () => {
   psSetStatus('Done.');
 });
 
+function getPdfMode() {
+  return document.querySelector('input[name="ps-pdf-mode"]:checked')?.value || 'cdp';
+}
+
 document.getElementById('ps-pdf-one').addEventListener('click', async () => {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   psSetStatus('Saving PDF...');
-  psSend('ps-save-pdf', { tabs: [tab] });
-  psSetStatus('Done — check Downloads/page-saver/');
+  psSend('ps-save-pdf', { tabs: [tab], pdfMode: getPdfMode() });
+  psSetStatus('Running in background...');
 });
 
 document.getElementById('ps-md-all').addEventListener('click', async () => {
@@ -318,7 +322,7 @@ document.getElementById('ps-png-all').addEventListener('click', async () => {
 
 document.getElementById('ps-pdf-all').addEventListener('click', async () => {
   const tabs = await browser.tabs.query({ currentWindow: true });
-  psSend('ps-save-pdf', { tabs });
+  psSend('ps-save-pdf', { tabs, pdfMode: getPdfMode() });
   psSetStatus('PDF export running in background...');
 });
 

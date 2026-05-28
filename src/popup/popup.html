@@ -78,6 +78,14 @@
         <button class="ps-btn orange" id="ps-png-one">Screenshot</button>
         <button class="ps-btn red"    id="ps-pdf-one">Save as PDF</button>
       </div>
+      <div style="font-size:11px;margin-top:2px;display:flex;gap:10px;color:#aaa">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="ps-pdf-mode" value="print"> Print dialog
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="ps-pdf-mode" value="cdp" checked> Silent (CDP)
+        </label>
+      </div>
     </div>
 
     <div class="ps-section">
@@ -150,7 +158,10 @@
           <input type="radio" name="ps-url-mode" value="screenshot"> Screenshots
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="radio" name="ps-url-mode" value="pdf"> PDF
+          <input type="radio" name="ps-url-mode" value="pdf"> PDF (silent)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="ps-url-mode" value="pdf-print"> PDF (print dialog)
         </label>
       </div>
       <div id="ps-url-delay-row">

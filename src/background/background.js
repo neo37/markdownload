@@ -621,7 +621,7 @@ async function notify(message, sender) {
     psSaveTabs(message.tabs, 'png');
   }
   else if (message.type === 'ps-save-pdf') {
-    psSaveTabs(message.tabs, 'pdf');
+    psSaveTabs(message.tabs, 'pdf', message.pdfMode);
   }
   else if (message.type === 'ps-save-md-all') {
     const mdTabs = (message.tabs || []).filter(t =>
@@ -1203,6 +1203,8 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true
         await psTabToPng(tab, folder, sel);
       } else if (mode === 'pdf') {
         await psTabToPdf(tab, folder, false);
+      } else if (mode === 'pdf-print') {
+        await psTabToPdf(tab, folder, true);
       }
     } catch(e) {
       console.error('[psOpenUrlList] failed for', urls[i], e);
@@ -1453,7 +1455,7 @@ async function psQueueImages(tabs) {
   dbgLog('psQueueImages: queued', total, 'images from', allowed.length, 'tabs', _blockSelector ? `(block: ${_blockSelector})` : '(whole page)');
 }
 
-async function psSaveTabs(tabs, format) {
+async function psSaveTabs(tabs, format, pdfMode = 'cdp') {
   const folder = psTimestamp();
   const allowed = (tabs || []).filter(t =>
     t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://')
@@ -1463,7 +1465,7 @@ async function psSaveTabs(tabs, format) {
     try {
       if (format === 'html') await psTabToHtml(tab, folder);
       else if (format === 'png')  await psTabToPng(tab, folder);
-      else if (format === 'pdf')  await psTabToPdf(tab, folder, allowed.length === 1);
+      else if (format === 'pdf')  await psTabToPdf(tab, folder, pdfMode === 'print');
     } catch (e) {
       console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
     }
