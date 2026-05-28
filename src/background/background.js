@@ -1326,32 +1326,41 @@ async function psTabToPng(tab, folder, blockSelector = null) {
     const cx = Math.floor(innerWidth / 2);
     const cy = Math.floor(innerHeight / 2);
 
-    // scroll to start via JS (reliable for initial position)
+    // scroll to start
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
     await swDelay(500);
 
     const shots = [];
-    let scrollY = startY;
+
+    const getScrollY = async () => {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollY });
+      return r?.[0]?.result ?? 0;
+    };
+    const getScrollHeight = async () => {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.documentElement.scrollHeight });
+      return r?.[0]?.result ?? innerHeight;
+    };
 
     while (true) {
-      // capture current viewport
       const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
       shots.push(dataUrl.split(',')[1]);
 
-      const nextY = scrollY + innerHeight;
-      if (nextY >= scrollHeight) break;
-      scrollY = nextY;
+      const curY = await getScrollY();
+      const curScrollHeight = await getScrollHeight();
 
-      // click center for focus, then synthesize a real scroll gesture by innerHeight px
+      dbgLog('[screenshot] scrollY=', curY, 'scrollHeight=', curScrollHeight, 'innerHeight=', innerHeight);
+
+      if (curY + innerHeight >= curScrollHeight) break;
+
+      // click center for focus, then scroll down one viewport
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
-      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', {
-        x: cx, y: cy,
-        xDistance: 0,
-        yDistance: innerHeight,
-        speed: 1000
-      });
+      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', { x: cx, y: cy, xDistance: 0, yDistance: innerHeight, speed: 800 });
       await swDelay(600);
+
+      // verify scroll actually moved; if stuck, break
+      const newY = await getScrollY();
+      if (newY <= curY) break;
     }
 
     const base = blockSelector
