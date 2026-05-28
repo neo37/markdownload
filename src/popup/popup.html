@@ -133,7 +133,10 @@
   <!-- URL list modal -->
   <div id="ps-url-modal">
     <div id="ps-url-modal-box">
-      <label>Paste URLs (one per line):</label>
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px">
+        <label style="flex:1;margin:0">Paste URLs (one per line):</label>
+        <button class="ps-btn purple" id="ps-url-collect" style="flex:0 0 auto;padding:4px 8px;font-size:10px">Collect from page</button>
+      </div>
       <textarea id="ps-url-textarea" placeholder="https://example.com&#10;https://another.com"></textarea>
       <label>Mode:</label>
       <div style="display:flex;flex-direction:column;gap:4px;font-size:11px;">
@@ -153,6 +156,11 @@
       <div id="ps-url-delay-row">
         Delay between URLs:
         <input id="ps-url-delay" type="number" value="3" min="1" max="60"> sec
+      </div>
+      <div style="font-size:11px;margin-bottom:2px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ps-url-close-tabs" checked> Close tabs after processing
+        </label>
       </div>
       <div id="ps-url-modal-btns">
         <button class="ps-btn green" id="ps-url-start" style="flex:1">Start</button>

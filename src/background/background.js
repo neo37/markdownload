@@ -657,7 +657,7 @@ async function notify(message, sender) {
     processImgQueue();
   }
   else if (message.type === 'ps-open-url-list') {
-    psOpenUrlList(message.urls, message.delay, message.mode);
+    psOpenUrlList(message.urls, message.delay, message.mode, message.closeTabs !== false);
   }
   else if (message.type === 'ps-queue-images') {
     psQueueImages(message.tabs);
@@ -1170,7 +1170,7 @@ function waitForTabLoad(tabId) {
   });
 }
 
-async function psOpenUrlList(urls, delaySec = 3, mode = 'open') {
+async function psOpenUrlList(urls, delaySec = 3, mode = 'open', closeTabs = true) {
   if (mode === 'open') {
     for (const url of urls) {
       browser.tabs.create({ url, active: false });
@@ -1186,7 +1186,6 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open') {
     try {
       tab = await browser.tabs.create({ url, active: false });
       await waitForTabLoad(tab.id);
-      // extra settle time for JS-heavy pages
       await new Promise(r => setTimeout(r, 1500));
 
       if (mode === 'markdown') {
@@ -1201,7 +1200,7 @@ async function psOpenUrlList(urls, delaySec = 3, mode = 'open') {
     } catch(e) {
       console.error('[psOpenUrlList] failed for', url, e);
     } finally {
-      if (tab) browser.tabs.remove(tab.id).catch(() => {});
+      if (tab && closeTabs) browser.tabs.remove(tab.id).catch(() => {});
     }
 
     await new Promise(r => setTimeout(r, delaySec * 1000));

@@ -463,6 +463,21 @@ urlModal.addEventListener('click', (e) => {
   if (e.target === urlModal) urlModal.classList.remove('open');
 });
 
+document.getElementById('ps-url-collect').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const seen = new Set();
+      return Array.from(document.querySelectorAll('a[href]'))
+        .map(a => a.href)
+        .filter(u => (u.startsWith('http://') || u.startsWith('https://')) && !seen.has(u) && seen.add(u));
+    }
+  });
+  const urls = results?.[0]?.result || [];
+  urlTextarea.value = urls.join('\n');
+});
+
 document.getElementById('ps-url-start').addEventListener('click', () => {
   const urls = urlTextarea.value
     .split('\n')
@@ -471,7 +486,8 @@ document.getElementById('ps-url-start').addEventListener('click', () => {
   if (!urls.length) return;
   const delay = Math.max(1, parseInt(urlDelay.value) || 3);
   const mode = document.querySelector('input[name="ps-url-mode"]:checked')?.value || 'markdown';
-  psSend('ps-open-url-list', { urls, delay, mode });
+  const closeTabs = document.getElementById('ps-url-close-tabs').checked;
+  psSend('ps-open-url-list', { urls, delay, mode, closeTabs });
   urlModal.classList.remove('open');
   psSetStatus(`Processing ${urls.length} URLs as ${mode}…`);
   window.close();
