@@ -562,6 +562,25 @@ async function notify(message) {
   else if (message.type == "download") {
     downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
   }
+  // ── Page Saver handlers ──────────────────────────────────────────────────
+  else if (message.type === 'ps-open-links') {
+    psOpenLinks(message.tabId);
+  }
+  else if (message.type === 'ps-save-html') {
+    psSaveTabs(message.tabs, 'html');
+  }
+  else if (message.type === 'ps-save-png') {
+    psSaveTabs(message.tabs, 'png');
+  }
+  else if (message.type === 'ps-save-pdf') {
+    psSaveTabs(message.tabs, 'pdf');
+  }
+  else if (message.type === 'ps-save-md-all') {
+    message.tabs.forEach(tab => {
+      const info = { menuItemId: 'download-markdown-all' };
+      downloadMarkdownFromContext(info, tab);
+    });
+  }
 }
 
 browser.commands.onCommand.addListener(function (command) {
@@ -1023,4 +1042,131 @@ if (!String.prototype.replaceAll) {
 		return this.replace(new RegExp(str, 'g'), newStr);
 
 	};
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Page Saver — HTML / PNG / PDF / open-links
+// ════════════════════════════════════════════════════════════════════════════
+
+function psTimestamp() {
+  // moment.js is loaded in background
+  return moment().format('YYYY-MM-DD_HH-mm');
+}
+
+function psSanitize(name) {
+  return (name || 'page').replace(/[\\/:*?"<>|]/g, '_').substring(0, 100);
+}
+
+function psDownloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  return browser.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' })
+    .then(id => {
+      // release blob url after download starts
+      browser.downloads.onChanged.addListener(function release(delta) {
+        if (delta.id === id && delta.state && delta.state.current !== 'in_progress') {
+          URL.revokeObjectURL(url);
+          browser.downloads.onChanged.removeListener(release);
+        }
+      });
+    });
+}
+
+function psBase64ToBlob(b64, mime) {
+  const bytes = atob(b64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+// Open all links from a tab with 3-second delay between each
+async function psOpenLinks(tabId) {
+  const results = await browser.tabs.executeScript(tabId, {
+    code: `(function() {
+      const seen = new Set();
+      const urls = [];
+      document.querySelectorAll('a[href]').forEach(a => {
+        try {
+          const url = new URL(a.href, location.href).href;
+          if (!seen.has(url) && !url.startsWith('javascript:') && !url.startsWith('mailto:')) {
+            seen.add(url); urls.push(url);
+          }
+        } catch(e) {}
+      });
+      return urls;
+    })()`
+  });
+
+  const urls = results[0] || [];
+  for (const url of urls) {
+    await new Promise(r => setTimeout(r, 3000));
+    browser.tabs.create({ url, active: false });
+  }
+}
+
+// Save tab as HTML (rendered DOM)
+async function psTabToHtml(tab, folder) {
+  const results = await browser.tabs.executeScript(tab.id, {
+    code: `'<!DOCTYPE html>\\n' + document.documentElement.outerHTML`
+  });
+  const html = results[0];
+  const title = psSanitize(tab.title);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  return psDownloadBlob(blob, `page-saver/${folder}/html/${title}.html`);
+}
+
+// Save tab as PNG screenshot
+async function psTabToPng(tab, folder) {
+  const title = psSanitize(tab.title);
+  // Activate tab briefly (required for captureVisibleTab)
+  const [prev] = await browser.tabs.query({ active: true, currentWindow: true });
+  await browser.tabs.update(tab.id, { active: true });
+  await new Promise(r => setTimeout(r, 400));
+  const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  if (prev && prev.id !== tab.id) await browser.tabs.update(prev.id, { active: true });
+  const b64 = dataUrl.split(',')[1];
+  return psDownloadBlob(psBase64ToBlob(b64, 'image/png'), `page-saver/${folder}/screenshots/${title}.png`);
+}
+
+// Save tab as PDF via Chrome DevTools Protocol
+async function psTabToPdf(tab, folder) {
+  const title = psSanitize(tab.title);
+
+  await new Promise((res, rej) =>
+    chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
+      chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res()
+    )
+  );
+
+  try {
+    const result = await new Promise((res, rej) =>
+      chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        'Page.printToPDF',
+        { printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
+          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
+        r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
+      )
+    );
+    return psDownloadBlob(psBase64ToBlob(result.data, 'application/pdf'), `page-saver/${folder}/pdf/${title}.pdf`);
+  } finally {
+    chrome.debugger.detach({ tabId: tab.id });
+  }
+}
+
+// Batch runner — all tabs for a given format
+async function psSaveTabs(tabs, format) {
+  const folder = psTimestamp();
+  const allowed = (tabs || []).filter(t =>
+    t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://')
+  );
+
+  for (const tab of allowed) {
+    try {
+      if (format === 'html') await psTabToHtml(tab, folder);
+      else if (format === 'png')  await psTabToPng(tab, folder);
+      else if (format === 'pdf')  await psTabToPdf(tab, folder);
+    } catch (e) {
+      console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
+    }
+  }
 }

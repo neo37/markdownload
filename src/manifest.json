@@ -18,7 +18,9 @@
     "downloads",
     "storage",
     "contextMenus",
-    "clipboardWrite"
+    "clipboardWrite",
+    "tabs",
+    "debugger"
   ],
   "browser_action": {
     "default_title": "MarkDownload",
@@ -85,7 +87,6 @@
     "copy_tab_to_obsidian": {
       "description": "Copy current tab as Markdown to Obsidian"
     }
-    
   },
   "browser_specific_settings": {
     "gecko": {

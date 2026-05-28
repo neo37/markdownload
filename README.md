@@ -1,3 +1,19 @@
+# MarkDownload — Page Saver Fork
+
+> **Fork of [deathau/markdownload](https://github.com/deathau/markdownload)** — all original functionality preserved, with added bulk save features.
+
+## What's new in this fork
+
+- **Open all links** — finds every link on the current page and opens each in a new background tab with a 3-second delay between them
+- **Save current tab or all tabs** as:
+  - **Markdown** (using Readability + Turndown, same as original)
+  - **HTML** — full rendered DOM (post-JavaScript)
+  - **PNG** — visible-viewport screenshot
+  - **PDF** — silent export via Chrome DevTools Protocol, no print dialog
+- **Timestamped folders** — every batch save goes into `page-saver/YYYY-MM-DD_HH-mm/` inside Downloads, keeping sessions organised
+
+---
+
 # MarkDownload - Markdown Web Clipper
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/deathau/markdownload?style=for-the-badge&sort=semver)](https://github.com/deathau/markdownload/releases/latest)

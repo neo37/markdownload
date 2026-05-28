@@ -240,3 +240,65 @@ function showError(err) {
     cm.setValue(`Error clipping the page\n\n${err}`)
 }
 
+
+// ── Page Saver extras ────────────────────────────────────────────────────────
+
+const psStatus = document.getElementById('ps-status');
+function psSetStatus(msg) { psStatus.textContent = msg; }
+
+function psSend(type, extra = {}) {
+  return browser.runtime.sendMessage({ type, ...extra });
+}
+
+document.getElementById('ps-open-links').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  psSend('ps-open-links', { tabId: tab.id });
+  psSetStatus('Opening links...');
+});
+
+document.getElementById('ps-html-one').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  psSetStatus('Saving HTML...');
+  await psSend('ps-save-html', { tabs: [tab] });
+  psSetStatus('Done.');
+});
+
+document.getElementById('ps-png-one').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  psSetStatus('Saving screenshot...');
+  psSend('ps-save-png', { tabs: [tab] });
+  psSetStatus('Done.');
+});
+
+document.getElementById('ps-pdf-one').addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  psSetStatus('Saving PDF...');
+  psSend('ps-save-pdf', { tabs: [tab] });
+  psSetStatus('Done — check Downloads/page-saver/');
+});
+
+document.getElementById('ps-md-all').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  psSetStatus(`Saving ${tabs.length} tabs as Markdown...`);
+  psSend('ps-save-md-all', { tabs });
+  psSetStatus('Running in background...');
+});
+
+document.getElementById('ps-html-all').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  psSetStatus(`Saving ${tabs.length} tabs as HTML...`);
+  psSend('ps-save-html', { tabs });
+  psSetStatus('Running in background...');
+});
+
+document.getElementById('ps-png-all').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  psSend('ps-save-png', { tabs });
+  psSetStatus('Screenshots running in background...');
+});
+
+document.getElementById('ps-pdf-all').addEventListener('click', async () => {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  psSend('ps-save-pdf', { tabs });
+  psSetStatus('PDF export running in background...');
+});
