@@ -1294,9 +1294,9 @@ async function psTabToPng(tab, folder, blockSelector = null) {
     const cx = Math.floor(innerWidth / 2);
     const cy = Math.floor(innerHeight / 2);
 
-    // scroll to start position
-    await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: startY });
-    await swDelay(400);
+    // scroll to start via JS (reliable for initial position)
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [startY] });
+    await swDelay(500);
 
     const shots = [];
     let scrollY = startY;
@@ -1308,15 +1308,18 @@ async function psTabToPng(tab, folder, blockSelector = null) {
 
       const nextY = scrollY + innerHeight;
       if (nextY >= scrollHeight) break;
-
-      const delta = nextY - scrollY;
       scrollY = nextY;
 
-      // click center to ensure focus, then scroll with mouse wheel
+      // click center for focus, then synthesize a real scroll gesture by innerHeight px
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
       await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
-      await cdpCmd(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: delta });
-      await swDelay(500);
+      await cdpCmd(tab.id, 'Input.synthesizeScrollGesture', {
+        x: cx, y: cy,
+        xDistance: 0,
+        yDistance: -innerHeight,  // negative = scroll down
+        speed: 1000
+      });
+      await swDelay(600);
     }
 
     const base = blockSelector
