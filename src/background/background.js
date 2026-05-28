@@ -620,6 +620,16 @@ async function notify(message, sender) {
       dbgLog('ps-save-md-all: all done');
     })();
   }
+  else if (message.type === 'block-picked') {
+    // relay selector from content script → popup
+    browser.runtime.sendMessage({ type: 'block-picked', selector: message.selector }).catch(() => {});
+  }
+  else if (message.type === 'block-pick-cancelled') {
+    browser.runtime.sendMessage({ type: 'block-pick-cancelled' }).catch(() => {});
+  }
+  else if (message.type === 'ps-save-block-all') {
+    psSaveBlockAll(message.tabs, message.selector, message.saveAs);
+  }
 }
 
 browser.commands.onCommand.addListener(function (command) {
@@ -1206,6 +1216,86 @@ async function psSaveTabs(tabs, format) {
       console.error(`[page-saver] ${format} failed for "${tab.title}":`, e.message || e);
     }
   }
+}
+
+// Save a specific CSS block from all tabs as Markdown + images
+async function psSaveBlockAll(tabs, selector, saveAs = false) {
+  const folder = `block-save/${psTimestamp()}`;
+  const allowed = (tabs || []).filter(t =>
+    t.url && !t.url.startsWith('chrome://') && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('about:')
+  );
+  dbgLog('psSaveBlockAll: selector=', selector, 'tabs=', allowed.length, 'folder=', folder);
+
+  for (const tab of allowed) {
+    try {
+      // 1. Get the block's outer HTML from the tab
+      const extractResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          return {
+            content: el.outerHTML,
+            title: document.title,
+            baseURI: document.baseURI,
+            pageTitle: document.title,
+            byline: null, excerpt: null, siteName: null,
+            keywords: [], math: {}
+          };
+        },
+        args: [selector]
+      });
+
+      const article = extractResult?.[0]?.result;
+      if (!article) {
+        dbgLog('psSaveBlockAll: block not found on', tab.title);
+        continue;
+      }
+
+      // 2. Convert block to Markdown (inject scripts + run in tab)
+      const options = await getOptions();
+      options.frontmatter = options.backmatter = '';
+      options.downloadImages = true;
+      options.imagePrefix = folder + '/images/';
+      options.saveAs = false;
+
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/turndown.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/turndown-plugin-gfm.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/background/convert-article.js'] });
+
+      const convResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (content, opts, art) => turndownInPage(content, opts, art),
+        args: [article.content, options, article]
+      });
+
+      const { markdown, imageList } = convResult?.[0]?.result || {};
+      if (!markdown) { dbgLog('psSaveBlockAll: no markdown for', tab.title); continue; }
+
+      // 3. Download images
+      for (const [src, filename] of Object.entries(imageList || {})) {
+        try {
+          await browser.downloads.download({ url: src, filename, saveAs: false, conflictAction: 'uniquify' });
+        } catch (e) { /* image might be CORS-blocked */ }
+      }
+
+      // 4. Save markdown file
+      const safeTitle = generateValidFileName(article.title) || 'page';
+      const mdUrl = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+      await browser.downloads.download({
+        url: mdUrl,
+        filename: `${folder}/${safeTitle}.md`,
+        saveAs: saveAs,
+        conflictAction: 'uniquify'
+      });
+
+      dbgLog('psSaveBlockAll: saved', safeTitle);
+    } catch (e) {
+      dbgLog('psSaveBlockAll: error on', tab.title, e.message);
+      console.error('[block-save]', tab.title, e);
+    }
+  }
+  dbgLog('psSaveBlockAll: done');
 }
 
 // Recursive same-domain crawler

@@ -70,6 +70,28 @@
       </div>
     </div>
 
+    <div class="ps-section">
+      <span class="ps-label">Block selector — save one block from all tabs</span>
+      <div class="ps-row">
+        <button class="ps-btn purple" id="ps-pick-block">🖱 Pick block on page</button>
+        <button class="ps-btn" id="ps-cancel-pick" style="background:#555;display:none;flex:0 0 auto;padding:6px 8px;">Cancel</button>
+      </div>
+      <div id="ps-selector-row" style="display:none;margin-top:4px">
+        <input id="ps-selector-input" type="text" placeholder="CSS selector" style="
+          flex:1;width:100%;padding:5px 8px;font-size:11px;font-family:monospace;
+          border:1px solid #4A90E2;border-radius:4px;background:transparent;color:inherit;
+        ">
+      </div>
+      <div class="ps-row" style="margin-top:4px;align-items:center;gap:8px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;flex-shrink:0">
+          <input type="checkbox" id="ps-block-saveas"> Choose location
+        </label>
+      </div>
+      <div class="ps-row" style="margin-top:4px">
+        <button class="ps-btn green" id="ps-block-md-all" disabled>Save block from all tabs → Markdown</button>
+      </div>
+    </div>
+
     <div id="ps-status"></div>
     <div class="ps-row" style="margin-top:4px">
       <button class="ps-btn" id="ps-show-logs" style="background:#666;font-size:10px">Show debug log</button>

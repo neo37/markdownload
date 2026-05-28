@@ -59,12 +59,10 @@ const toggleIncludeTemplate = options => {
     browser.storage.sync.set(options).then(() => {
         browser.contextMenus.update("toggle-includeTemplate", {
             checked: options.includeTemplate
-        });
-        try {
-            browser.contextMenus.update("tabtoggle-includeTemplate", {
-                checked: options.includeTemplate
-            });
-        } catch { }
+        }).catch(() => {});
+        browser.contextMenus.update("tabtoggle-includeTemplate", {
+            checked: options.includeTemplate
+        }).catch(() => {});
         return clipSite()
     }).catch((error) => {
         console.error(error);
@@ -77,12 +75,10 @@ const toggleDownloadImages = options => {
     browser.storage.sync.set(options).then(() => {
         browser.contextMenus.update("toggle-downloadImages", {
             checked: options.downloadImages
-        });
-        try {
-            browser.contextMenus.update("tabtoggle-downloadImages", {
-                checked: options.downloadImages
-            });
-        } catch { }
+        }).catch(() => {});
+        browser.contextMenus.update("tabtoggle-downloadImages", {
+            checked: options.downloadImages
+        }).catch(() => {});
     }).catch((error) => {
         console.error(error);
     });
@@ -96,7 +92,12 @@ const showOrHideClipOption = selection => {
     }
 }
 
-const clipSite = id => {
+const clipSite = async id => {
+    if (!id) {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+        id = tab && tab.id;
+    }
+    if (!id) return;
     return chrome.scripting.executeScript({
         target: { tabId: id },
         func: () => getSelectionAndDom()
@@ -317,6 +318,76 @@ document.getElementById('ps-pdf-all').addEventListener('click', async () => {
   psSend('ps-save-pdf', { tabs });
   psSetStatus('PDF export running in background...');
 });
+
+// ── Block picker ──────────────────────────────────────────────────────────────
+
+const pickBtn    = document.getElementById('ps-pick-block');
+const cancelBtn  = document.getElementById('ps-cancel-pick');
+const selectorRow = document.getElementById('ps-selector-row');
+const selectorInput = document.getElementById('ps-selector-input');
+const blockMdBtn = document.getElementById('ps-block-md-all');
+
+// Restore saved selector
+browser.storage.local.get('_blockSelector').then(({ _blockSelector }) => {
+  if (_blockSelector) {
+    selectorInput.value = _blockSelector;
+    selectorRow.style.display = 'block';
+    blockMdBtn.disabled = false;
+  }
+});
+
+// Allow manual edit of selector
+selectorInput.addEventListener('input', () => {
+  const v = selectorInput.value.trim();
+  blockMdBtn.disabled = !v;
+  browser.storage.local.set({ _blockSelector: v });
+});
+
+pickBtn.addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['/contentScript/blockPicker.js'] });
+  pickBtn.style.display = 'none';
+  cancelBtn.style.display = '';
+  psSetStatus('Click on a block in the page…');
+  window.close(); // close popup so user can click on page
+});
+
+cancelBtn.addEventListener('click', async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  browser.tabs.sendMessage(tab.id, { type: 'cancel-block-picker' }).catch(() => {});
+  cancelBtn.style.display = 'none';
+  pickBtn.style.display = '';
+  psSetStatus('Cancelled.');
+});
+
+// Receive selector from background (relayed from content script)
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'block-picked') {
+    selectorInput.value = msg.selector;
+    selectorRow.style.display = 'block';
+    blockMdBtn.disabled = false;
+    cancelBtn.style.display = 'none';
+    pickBtn.style.display = '';
+    psSetStatus('Block selected: ' + msg.selector);
+    browser.storage.local.set({ _blockSelector: msg.selector });
+  }
+  if (msg.type === 'block-pick-cancelled') {
+    cancelBtn.style.display = 'none';
+    pickBtn.style.display = '';
+    psSetStatus('');
+  }
+});
+
+blockMdBtn.addEventListener('click', async () => {
+  const selector = selectorInput.value.trim();
+  if (!selector) return;
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  const saveAs = document.getElementById('ps-block-saveas').checked;
+  psSetStatus(`Saving block from ${tabs.length} tabs…`);
+  psSend('ps-save-block-all', { tabs, selector, saveAs });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 document.getElementById('ps-show-logs').addEventListener('click', async () => {
   const { _debugLog = [] } = await browser.storage.local.get('_debugLog');
