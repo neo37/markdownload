@@ -1280,15 +1280,23 @@ async function psTabToPng(tab, folder, blockSelector = null) {
   const shots = [];
   let scrollY = startY;
 
+  // get the window that contains this tab (needed for captureVisibleTab)
+  const tabInfo = await browser.tabs.get(tab.id);
+  const windowId = tabInfo.windowId;
+
   while (true) {
-    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    shots.push(dataUrl.split(',')[1]);
+    try {
+      const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
+      shots.push(dataUrl.split(',')[1]);
+    } catch(e) {
+      console.warn('[screenshot] captureVisibleTab failed, skipping frame', e.message);
+    }
 
     const nextY = scrollY + innerHeight;
     if (nextY >= scrollHeight) break;
     scrollY = nextY;
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (y) => window.scrollTo(0, y), args: [scrollY] });
-    await swDelay(350);
+    await swDelay(400);
   }
 
   // restore
@@ -1325,8 +1333,9 @@ async function psTabToPdf(tab, folder, single = false) {
       chrome.debugger.sendCommand(
         { tabId: tab.id },
         'Page.printToPDF',
-        { printBackground: false, paperWidth: 8.27, paperHeight: 11.69,
-          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
+        { printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
+          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4,
+          preferCSSPageSize: false, generateDocumentOutline: false },
         r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
       )
     );
