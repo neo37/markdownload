@@ -1320,22 +1320,46 @@ async function psTabToPdf(tab, folder, single = false) {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.print() });
     return;
   }
-  // wait for JS-rendered content to finish loading
-  await new Promise(r => setTimeout(r, 7000));
   const title = psSanitize(tab.title);
+
   await new Promise((res, rej) =>
     chrome.debugger.attach({ tabId: tab.id }, '1.3', () =>
       chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res()
     )
   );
   try {
+    // check if page is already loaded
+    const [readyResult] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => document.readyState
+    }).catch(() => [{ result: 'loading' }]);
+    const ready = readyResult?.result === 'complete';
+
+    if (!ready) {
+      // wait for load event via CDP
+      await new Promise((res) => {
+        const handler = (src, method) => {
+          if (src.tabId === tab.id && method === 'Page.loadEventFired') {
+            chrome.debugger.onEvent.removeListener(handler);
+            res();
+          }
+        };
+        chrome.debugger.onEvent.addListener(handler);
+        chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.enable', {}, () => {});
+        // safety timeout
+        swDelay(15000).then(res);
+      });
+    }
+
+    // extra wait for JS-heavy SPAs to finish rendering
+    await swDelay(5000);
+
     const result = await new Promise((res, rej) =>
       chrome.debugger.sendCommand(
         { tabId: tab.id },
         'Page.printToPDF',
         { printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
-          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4,
-          preferCSSPageSize: false, generateDocumentOutline: false },
+          marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 },
         r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r)
       )
     );
